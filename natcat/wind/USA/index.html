@@ -1,15 +1,23 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <title>FlowRenderer with visual variables | Sample | ArcGIS API for JavaScript 4.24</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vents animés USA – FlowRenderer (NLDAS 30/08/2021)</title>
+    <meta name="description" content="Rendu animé des flux de vent sur les États-Unis le 30 août 2021 (ouragan Ida), données NLDAS de la NASA, FlowRenderer de l'API ArcGIS JavaScript." />
 
-    <link rel="stylesheet" href="https://js.arcgis.com/4.24/esri/themes/dark/main.css" />
+    <!-- Empreintes SRI sur les ressources CDN à contenu figé (versions épinglées).
+         À recalculer si une version du CDN change. Le bootstrap js.arcgis.com/4.24/
+         en est exclu : il charge dynamiquement ses modules AMD, incompatible avec SRI. -->
+    <link rel="stylesheet" href="https://js.arcgis.com/4.24/esri/themes/dark/main.css"
+      integrity="sha384-4M6/vEWxFVqc3tZatEww17uYi/IuCaUdMMoQqJmFrZsnp6OKaiuDcJCxkX7RQ91M" crossorigin="anonymous" />
     <script src="https://js.arcgis.com/4.24/"></script>
-    <script type="module" src="https://js.arcgis.com/calcite-components/1.0.0-beta.82/calcite.esm.js"></script>
-    <script nomodule="" src="https://js.arcgis.com/calcite-components/1.0.0-beta.82/calcite.js"></script>
-    <link rel="stylesheet" type="text/css" href="https://js.arcgis.com/calcite-components/1.0.0-beta.82/calcite.css" />
+    <script type="module" src="https://js.arcgis.com/calcite-components/1.0.0-beta.82/calcite.esm.js"
+      integrity="sha384-2qnNSi3IaPS6uwLmhUlSO1BZ3+yBeH48jE7tehbp5f9R6Lu6dsto3qhtPhImBoif" crossorigin="anonymous"></script>
+    <script nomodule="" src="https://js.arcgis.com/calcite-components/1.0.0-beta.82/calcite.js"
+      integrity="sha384-zDwV4RVPmXJgQfN2GnPMYtSr2IUrT317sepiO6fVf6swtpWaeild07d5e7OSR4SC" crossorigin="anonymous"></script>
+    <link rel="stylesheet" type="text/css" href="https://js.arcgis.com/calcite-components/1.0.0-beta.82/calcite.css"
+      integrity="sha384-6cmvrdCHLtnculdykoT8FcwSG8FvRyn5VqCngqVKISyTYfhCozmwelSNmWmNT4kG" crossorigin="anonymous" />
 
     <style>
       html,
@@ -21,36 +29,114 @@
         width: 100%;
       }
 
+      html,
+      body {
+        overflow: hidden;
+        background: #242424; /* fond sombre pendant le chargement (thème dark) */
+      }
+
       #controls {
         width: 300px;
         max-height: 90vh;
         overflow: auto;
       }
+
+      /* Titre pour les lecteurs d'écran uniquement */
+      #title {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        border: 0;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0); /* conservé pour les navigateurs anciens */
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      /* Indicateur de chargement des données de vent */
+      #loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 12px 20px;
+        border-radius: 4px;
+        z-index: 100;
+        pointer-events: none;
+        background-color: rgba(36, 36, 36, 0.9);
+        color: #ffffff;
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 14px;
+      }
+
+      /* Message d'erreur visible si le service de vent ne répond pas */
+      #message {
+        position: absolute;
+        top: 15px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 60%;
+        margin: 0;
+        padding: 0.5em 1em;
+        z-index: 100;
+        border-radius: 4px;
+        background-color: #b00020;
+        color: #ffffff;
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 14px;
+      }
+
+      /* Contexte du jeu de données, lisible sans déplier la légende (utile sur mobile) */
+      #context {
+        max-width: 60vw;
+        padding: 4px 8px;
+        border-radius: 4px;
+        pointer-events: none;
+        background-color: rgba(36, 36, 36, 0.9);
+        color: #ffffff;
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 12px;
+      }
+
+      #loading[hidden],
+      #message[hidden],
+      #context[hidden] {
+        display: none;
+      }
     </style>
 
     <script>
-      require(["esri/Map", "esri/views/MapView", "esri/layers/ImageryTileLayer", "esri/widgets/Legend", "esri/widgets/Expand"], function (
+      require(["esri/Map", "esri/views/MapView", "esri/layers/ImageryTileLayer", "esri/widgets/Legend", "esri/widgets/Expand", "esri/core/reactiveUtils"], function (
         Map,
         MapView,
         ImageryTileLayer,
         Legend,
-        Expand
+        Expand,
+        reactiveUtils
       ) {
+        // Source : NLDAS hourly forcing (NASA GES DISC), 30/08/2021, publié en tuiles LERC
+        // dans l'organisation des exemples Esri (item de35233eccad44c8a2df2ca53cfa8e5e).
         const layer = new ImageryTileLayer({
           url: "https://tiledimageservices.arcgis.com/V6ZHFr6zdgNZuVG0/arcgis/rest/services/NLDAS_Hourly_8_30_2021/ImageServer",
-          title: "Winds",
+          title: "Vent NLDAS (m/s) – 30 août 2021, ouragan Ida",
+          copyright: "NASA NLDAS / GES DISC",
           renderer: {
             type: "flow", // autocasts to new FlowRenderer
-            trailWidth: "2px",
-            // color: [50, 120, 240, 1],
+            trailWidth: 2, // en points, comme le curseur « Largeur des traits »
             density: 1,
             visualVariables: [{
               type: "color",
-              field: "Magnitude",
+              field: "Magnitude", // seul champ possible pour un service vectoriel U/V
+              // Libellés explicites : sans eux la légende affiche « > 10 » et « < 0 »,
+              // ce dernier n'ayant aucun sens pour une vitesse de vent (toujours positive).
+              // Le titre de la rampe reste « Magnitude » (legendOptions ignoré par le
+              // FlowRenderer en 4.24, revérifié) : l'unité est portée par les libellés.
               stops: [
-                { color: [40, 146, 199, 1], value: 0 },
-                { color: [160, 194, 155, 1], value: 5 },
-                { color: [218, 230, 119, 1], value: 10 }
+                { color: [40, 146, 199, 1], value: 0, label: "0 m/s" },
+                { color: [160, 194, 155, 1], value: 5, label: "5 m/s" },
+                { color: [218, 230, 119, 1], value: 10, label: "≥ 10 m/s" }
               ]
             }]
           },
@@ -58,41 +144,209 @@
         });
 
         const map = new Map({
-          basemap: "dark-gray-vector",
-          layers: [layer]
+          basemap: "dark-gray-vector"
         });
+
+        // Emprise CONUS annoncée par le service, pour cadrer dès la première image
+        // (sans saut de caméra au chargement). layer.fullExtent fait autorité ensuite.
+        const DATA_EXTENT = { xmin: -125, ymin: 25, xmax: -67, ymax: 53, spatialReference: { wkid: 4326 } };
+
+        const EARTH_RADIUS = 6378137; // sphère de la projection Web Mercator de la vue
+
+        function lonToX(lon) { return ((lon * Math.PI) / 180) * EARTH_RADIUS; }
+        function xToLon(x) { return ((x / EARTH_RADIUS) * 180) / Math.PI; }
+        function latToY(lat) { return Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) * EARTH_RADIUS; }
+        function yToLat(y) { return ((2 * Math.atan(Math.exp(y / EARTH_RADIUS)) - Math.PI / 2) * 180) / Math.PI; }
+
+        /**
+         * Recadre une emprise géographique pour qu'elle REMPLISSE un conteneur de ratio
+         * `aspect` (largeur / hauteur), à la façon d'un object-fit: cover : l'axe
+         * excédentaire est rogné, l'autre est conservé en entier. Un simple ajustement
+         * « contain » réduirait le champ de vent à une bande de 30 % de la hauteur en
+         * portrait, le reste de l'écran étant du fond de carte hors sujet. Le calcul se
+         * fait en Web Mercator, seule géométrie représentative de ce qui est affiché.
+         */
+        function coverBox(box, aspect) {
+          const x0 = lonToX(box.xmin), x1 = lonToX(box.xmax);
+          const y0 = latToY(box.ymin), y1 = latToY(box.ymax);
+          let halfW = (x1 - x0) / 2;
+          let halfH = (y1 - y0) / 2;
+          if (!(aspect > 0) || !(halfW > 0) || !(halfH > 0)) {
+            return box; // conteneur pas encore mesuré : emprise inchangée
+          }
+          if (aspect > halfW / halfH) {
+            halfH = halfW / aspect; // conteneur plus large que les données : rognage en hauteur
+          } else {
+            halfW = halfH * aspect; // conteneur plus étroit : rognage en largeur
+          }
+          const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+          return {
+            xmin: xToLon(cx - halfW),
+            ymin: yToLat(cy - halfH),
+            xmax: xToLon(cx + halfW),
+            ymax: yToLat(cy + halfH),
+            spatialReference: { wkid: 4326 }
+          };
+        }
+
+        // Cible de recalage : emprise réelle de la couche, recadrée au ratio du conteneur.
+        function frameFor(fullExtent) {
+          const sr = fullExtent && fullExtent.spatialReference;
+          if (!sr || !sr.isWGS84) {
+            return fullExtent; // emprise non géographique : ajustement standard
+          }
+          const boxed = coverBox(
+            { xmin: fullExtent.xmin, ymin: fullExtent.ymin, xmax: fullExtent.xmax, ymax: fullExtent.ymax },
+            view.width / view.height
+          );
+          const target = fullExtent.clone();
+          target.xmin = boxed.xmin;
+          target.ymin = boxed.ymin;
+          target.xmax = boxed.xmax;
+          target.ymax = boxed.ymax;
+          return target;
+        }
 
         const view = new MapView({
           container: "viewDiv",
           map: map,
-          zoom: 4,
-          center: [-98, 39]
-        });
-        const legendExpand = new Expand({
-          view: view,
-          content: new Legend({view:view}),
-          expanded: true
-        });
-        view.ui.add(legendExpand, "top-left");
-        const controlsExpand = new Expand({
-          view: view,
-          content: document.getElementById("controls"),
-          expandIconClass: "esri-icon-sliders-horizontal"
-        })
-        view.ui.add(controlsExpand, "top-right");
-
-        const sliderProps = ["trailWidth", "density", "maxPathLength", "flowSpeed", "trailLength"];
-        sliderProps.forEach((prop) => {
-          document.getElementById(prop).addEventListener("calciteSliderChange", updateRenderer);
+          extent: coverBox(DATA_EXTENT, window.innerWidth / window.innerHeight),
+          // Sans cela, l'ajustement à l'emprise est arrondi au niveau de zoom entier
+          // inférieur : un cran de trop en arrière, qui ramène des zones vides.
+          constraints: { snapToZoom: false }
         });
 
-        document.getElementById("flowRepresentation").addEventListener("calciteRadioGroupChange", updateRenderer);
-        document.getElementById("trailCap").addEventListener("calciteRadioGroupChange", updateRenderer);
-        document.getElementById("effectsEnabled").addEventListener("calciteCheckboxChange", updateEffect);
+        const loading = document.getElementById("loading");
+        const message = document.getElementById("message");
+        const context = document.getElementById("context");
+
+        const LOADING_GUARD_MS = 20000; // masquage du voile en dernier recours (réseau lent)
+        const MOBILE_DENSITY = 0.7; // densité de départ sur très petit écran (rendu WebGL moins coûteux)
+
+        let legendExpand = null; // créé par setupUI
+        let dataReady = false;
+
+        // Le bandeau de contexte reprend le titre de la couche : il ne sert que lorsque la
+        // légende est repliée (petit écran, ou repli manuel), sinon il ferait doublon.
+        function updateContext() {
+          context.hidden = !dataReady || !!(legendExpand && legendExpand.expanded);
+        }
+
+        function showMessage(text) {
+          loading.hidden = true;
+          if (!message.hidden) {
+            return; // un seul message affiché
+          }
+          message.textContent = text;
+          message.hidden = false;
+        }
+
+        function errorText(err) {
+          return err && err.message ? err.message : String(err);
+        }
+
+        // Attend la fin de la première mise à jour de la couche. On exige d'abord le passage
+        // à l'état « en cours » : sans cela, un abonnement arrivant avant le début du chargement
+        // des tuiles verrait updating === false et masquerait le voile trop tôt. Garde-fou de
+        // délai pour que le voile disparaisse même si cet enchaînement n'est jamais observé.
+        function whenFirstRenderDone(layerView) {
+          const firstUpdate = reactiveUtils
+            .whenOnce(() => layerView.updating)
+            .then(() => reactiveUtils.whenOnce(() => !layerView.updating));
+          const guard = new Promise((resolve) => setTimeout(resolve, LOADING_GUARD_MS));
+          return Promise.race([firstUpdate, guard]);
+        }
+
+        // La couche n'est ajoutée à la carte qu'une fois chargée : si le service ne répond pas,
+        // message visible (plus d'échec silencieux) et aucune promesse rejetée non gérée.
+        // L'indicateur de chargement est masqué après le premier rendu des tuiles de vent.
+        layer.load()
+          .then(() => {
+            map.add(layer);
+            dataReady = true; // contexte affiché seulement si la donnée est bien là
+            updateContext();
+            // Recalage sur l'emprise annoncée par le service, au ratio du conteneur.
+            view.when(() => view.goTo(frameFor(layer.fullExtent))).catch((err) => {
+              if (!err || err.name !== "view:goto-interrupted") {
+                // Navigation interrompue par l'utilisateur : sans conséquence. Sinon, la vue
+                // reste sur son cadrage initial, inutile d'alarmer avec un bandeau.
+                console.error("Recadrage sur l'emprise des données impossible : " + errorText(err));
+              }
+            });
+            return view.whenLayerView(layer);
+          })
+          .then(whenFirstRenderDone)
+          .then(() => {
+            loading.hidden = true;
+          })
+          .catch((err) => {
+            showMessage("Service de vent NLDAS (Esri) indisponible : " + errorText(err));
+          });
+
+        // Câblage de l'interface : isolé dans sa propre fonction pour que son échec éventuel
+        // (identifiant DOM manquant, par exemple) ne fasse pas croire que la carte est morte.
+        function setupUI() {
+          // Ajouté en premier : le bandeau reste correctement placé même si un câblage échoue.
+          view.ui.add(context, "bottom-left");
+
+          legendExpand = new Expand({
+            view: view,
+            content: new Legend({view:view}),
+            expandTooltip: "Afficher la légende",
+            collapseTooltip: "Masquer la légende",
+            // Repliée sur petit écran : l'Expand y devient un panneau plein écran qui masque la carte
+            expanded: view.widthBreakpoint !== "xsmall"
+          });
+          view.ui.add(legendExpand, "top-left");
+          reactiveUtils.watch(() => legendExpand.expanded, updateContext);
+          updateContext();
+          reactiveUtils.watch(() => view.widthBreakpoint, (breakpoint) => {
+            if (breakpoint === "xsmall") {
+              legendExpand.expanded = false;
+            }
+          });
+          const controlsExpand = new Expand({
+            view: view,
+            content: document.getElementById("controls"),
+            expandIconClass: "esri-icon-sliders-horizontal",
+            expandTooltip: "Paramètres du rendu",
+            collapseTooltip: "Masquer les paramètres"
+          })
+          view.ui.add(controlsExpand, "top-right");
+
+          const sliderProps = ["trailWidth", "density", "maxPathLength", "flowSpeed", "trailLength"];
+          sliderProps.forEach((prop) => {
+            document.getElementById(prop).addEventListener("calciteSliderChange", updateRenderer);
+          });
+
+          document.getElementById("flowRepresentation").addEventListener("calciteRadioGroupChange", updateRenderer);
+          document.getElementById("trailCap").addEventListener("calciteRadioGroupChange", updateRenderer);
+          document.getElementById("effectsEnabled").addEventListener("calciteCheckboxChange", updateEffect);
+
+          // Sur très petit écran, démarrage à densité réduite : c'est le réglage le plus
+          // coûteux en rendu WebGL. Le curseur « Densité » permet de remonter à 1.
+          if (view.widthBreakpoint === "xsmall") {
+            document.getElementById("density").value = MOBILE_DENSITY;
+            const lighterRenderer = layer.renderer.clone();
+            lighterRenderer.density = MOBILE_DENSITY;
+            layer.renderer = lighterRenderer;
+          }
+        }
+
+        view.when(() => {
+          try {
+            setupUI();
+          } catch (err) {
+            // Carte fonctionnelle, seuls des contrôles manquent : pas de bandeau trompeur.
+            console.error("Câblage de l'interface incomplet : " + errorText(err));
+          }
+        }).catch((err) => {
+          showMessage("Carte indisponible : " + errorText(err));
+        });
 
         function updateEffect(event) {
-          let checkbox = event.target.checked ? "bloom(1.5, 0.5px, 0)" : null;
-          layer.effect = checkbox;
+          let effect = event.target.checked ? "bloom(1.5, 0.5px, 0)" : null;
+          layer.effect = effect;
         }
 
         function updateRenderer(event) {
@@ -116,38 +370,42 @@
   </head>
 
   <body>
+    <h1 id="title">Vents animés sur les États-Unis – NLDAS, 30 août 2021 (ouragan Ida)</h1>
     <div id="viewDiv"></div>
+    <div id="loading" role="status">Chargement des vents…</div>
+    <p id="message" role="alert" hidden></p>
+    <div id="context" hidden>Vent NLDAS – 30 août 2021, ouragan Ida (m/s)</div>
     <calcite-card id="controls" class="calcite-theme-dark">
-      <div slot="title">Controls</div>
-      <calcite-label>Trail width
+      <div slot="title">Paramètres</div>
+      <calcite-label>Largeur des traits
         <calcite-slider id="trailWidth" min="0.1" max="10" value="2" step="0.1" label-handles></calcite-slider>
       </calcite-label>
-      <calcite-label>Trail length
+      <calcite-label>Longueur des traits
         <calcite-slider id="trailLength" min="0.1" max="200" value="100" label-handles></calcite-slider>
       </calcite-label>
-      <calcite-label>Density
+      <calcite-label>Densité
         <calcite-slider id="density" min="0.1" max="1" value="1" step="0.1" label-handles></calcite-slider>
       </calcite-label>
-      <calcite-label>Flow speed
+      <calcite-label>Vitesse du flux
         <calcite-slider id="flowSpeed" min="0.1" max="40" value="10" step="0.1" label-handles></calcite-slider>
       </calcite-label>
-      <calcite-label>Maximum path length
+      <calcite-label>Longueur maximale des trajectoires
         <calcite-slider id="maxPathLength" min="0.1" max="300" value="200" label-handles></calcite-slider>
       </calcite-label>
-      <calcite-label>Flow representation
+      <calcite-label>Représentation du flux
         <calcite-radio-group id="flowRepresentation">
-          <calcite-radio-group-item value="flow-to">To</calcite-radio-group-item>
-          <calcite-radio-group-item value="flow-from" checked>From</calcite-radio-group-item>
+          <calcite-radio-group-item value="flow-to">Vers</calcite-radio-group-item>
+          <calcite-radio-group-item value="flow-from" checked>Depuis</calcite-radio-group-item>
         </calcite-radio-group>
       </calcite-label>
-      <calcite-label>Cap style
+      <calcite-label>Extrémité des traits
         <calcite-radio-group id="trailCap">
-          <calcite-radio-group-item value="butt" checked>Butt</calcite-radio-group-item>
-          <calcite-radio-group-item value="round">Round</calcite-radio-group-item>
+          <calcite-radio-group-item value="butt" checked>Droite</calcite-radio-group-item>
+          <calcite-radio-group-item value="round">Arrondie</calcite-radio-group-item>
         </calcite-radio-group>
-        <small>*Round caps are only supported when trail width is greater than 3pt</small>
+        <small>*Extrémité arrondie uniquement si la largeur des traits dépasse 3 pt</small>
       </calcite-label>
-      <calcite-label>Effects enabled
+      <calcite-label>Effet de halo (bloom)
         <calcite-checkbox id="effectsEnabled" checked></calcite-checkbox>
       </calcite-label>
     </calcite-card>
