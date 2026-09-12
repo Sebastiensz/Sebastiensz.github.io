@@ -1,11 +1,16 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <title>CSVLayer - Project points on the fly | Sample | ArcGIS API for JavaScript 4.24</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ouragans – Projection stéréographique polaire sud</title>
+    <meta name="description" content="Trajectoires d'ouragans IBTrACS/NOAA de 1950 à 2015, reprojetées à la volée du WGS84 vers la projection stéréographique polaire sud, côté client." />
 
-    <link rel="stylesheet" href="https://js.arcgis.com/4.24/esri/themes/dark/main.css" />
+    <!-- Empreinte SRI sur la feuille de style CDN à contenu figé (version épinglée),
+         comme dans natcat/wind/USA. Le bootstrap js.arcgis.com/4.24/ en est exclu :
+         il charge dynamiquement ses modules AMD, incompatible avec SRI. -->
+    <link rel="stylesheet" href="https://js.arcgis.com/4.24/esri/themes/dark/main.css"
+      integrity="sha384-4M6/vEWxFVqc3tZatEww17uYi/IuCaUdMMoQqJmFrZsnp6OKaiuDcJCxkX7RQ91M" crossorigin="anonymous" />
 
     <style>
       html,
@@ -17,41 +22,186 @@
         width: 100%;
         background-color: black;
       }
+
+      /* Titre pour les lecteurs d'écran uniquement */
+      #title {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        border: 0;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0); /* conservé pour les navigateurs anciens */
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+
+      /* Indicateur de chargement : le CSV et le moteur de reprojection wasm pèsent
+         environ 1 Mo, l'écran resterait noir plusieurs secondes sans ce voile. */
+      #loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 12px 20px;
+        border-radius: 4px;
+        z-index: 100;
+        pointer-events: none;
+        background-color: rgba(20, 20, 20, 0.9);
+        color: #ffffff;
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 14px;
+      }
+
+      /* Message d'erreur visible si une des sources externes ne répond pas */
+      #message {
+        position: absolute;
+        top: 15px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 70%;
+        margin: 0;
+        padding: 0.5em 1em;
+        z-index: 100;
+        border-radius: 4px;
+        background-color: #b00020;
+        color: #ffffff;
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 14px;
+      }
+
+      /* Contexte du jeu de données : source, période, nature de la démonstration.
+         Fond opaque accordé aux widgets du thème sombre : le panneau se lit aussi
+         au-dessus de l'imagerie claire du fond de carte de repli. */
+      #info {
+        width: 270px;
+        max-width: 70vw;
+        max-height: 60vh;
+        overflow: auto;
+        padding: 2px 12px 10px;
+        background-color: rgba(36, 36, 36, 0.95);
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+
+      #info h2 {
+        margin: 10px 0 6px;
+        font-size: 13px;
+      }
+
+      #info p {
+        margin: 6px 0;
+      }
+
+      #info .credit {
+        color: #b9b9b9;
+      }
+
+      /* Sans JavaScript la page n'est qu'un rectangle noir : on le dit. */
+      #noscript {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        max-width: 70%;
+        padding: 12px 20px;
+        border-radius: 4px;
+        background-color: rgba(20, 20, 20, 0.9);
+        color: #ffffff;
+        font-family: "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        font-size: 14px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
     </style>
 
     <script src="https://js.arcgis.com/4.24/"></script>
 
     <script>
       require([
+        "esri/Basemap",
         "esri/WebMap",
         "esri/layers/CSVLayer",
         "esri/views/MapView",
         "esri/widgets/Legend",
-        "esri/widgets/Expand"
-      ], (WebMap, CSVLayer, MapView, Legend, Expand) => {
-        const url = "https://arcgis.github.io/arcgis-samples-javascript/sample-data/hurricanes.csv";
+        "esri/widgets/Expand",
+        "esri/core/reactiveUtils"
+      ], (Basemap, WebMap, CSVLayer, MapView, Legend, Expand, reactiveUtils) => {
+        // Données et symboles servis par le dépôt d'exemples Esri (arcgis.github.io)
+        const SAMPLE_DATA_URL = "https://arcgis.github.io/arcgis-samples-javascript/sample-data/";
+        const url = SAMPLE_DATA_URL + "hurricanes.csv";
+
+        // Fond de carte en projection stéréographique polaire sud (item de portail Esri)
+        const BASEMAP_ITEM_ID = "3113eacc129942b4abde490a51aeb33f";
+        // Repli si cet item d'exemple venait à disparaître : fond standard, donc en
+        // Web Mercator, la reprojection polaire n'étant alors plus démontrable.
+        const FALLBACK_BASEMAP = "satellite";
+
+        // Classes Saffir-Simpson : seuils convertis des nœuds de la source en km/h.
+        // Les couleurs et tailles ne servent qu'au rendu de repli (voir createRenderer).
+        const CATEGORIES = [
+          { value: 1, image: "cat1.png", label: "Catégorie 1 – 119 à 153 km/h", color: [64, 196, 255, 0.85], size: 3 },
+          { value: 2, image: "cat2.png", label: "Catégorie 2 – 154 à 177 km/h", color: [46, 230, 168, 0.85], size: 4 },
+          { value: 3, image: "cat3.png", label: "Catégorie 3 – 178 à 208 km/h", color: [159, 240, 74, 0.9], size: 5 },
+          { value: 4, image: "cat4.png", label: "Catégorie 4 – 209 à 251 km/h", color: [255, 225, 74, 0.9], size: 6 },
+          { value: 5, image: "cat5.png", label: "Catégorie 5 – 252 km/h et plus", color: [255, 255, 255, 0.95], size: 7 }
+        ];
+
+        const LOADING_GUARD_MS = 25000; // masquage du voile en dernier recours (réseau lent)
+
+        const loading = document.getElementById("loading");
+        const message = document.getElementById("message");
+        const info = document.getElementById("info");
+        const count = document.getElementById("count");
+
+        const shown = []; // messages déjà affichés, pour ne pas les répéter
+
+        function errorText(err) {
+          return err && err.message ? err.message : String(err);
+        }
+
+        function notifyBasemapFailure(err) {
+          showMessage(
+            "Fond de carte indisponible (" + errorText(err) +
+              ") : les trajectoires restent affichées sur fond neutre."
+          );
+        }
+
+        function showMessage(text) {
+          loading.hidden = true;
+          if (shown.indexOf(text) !== -1) {
+            return;
+          }
+          shown.push(text);
+          message.textContent = shown.join(" ");
+          message.hidden = false;
+        }
 
         const csvLayer = new CSVLayer({
-          title: "Hurricanes",
+          title: "Ouragans (échelle Saffir-Simpson)",
           url: url,
-          copyright: "NOAA",
+          copyright: "IBTrACS / NOAA – catégories 1 à 5, 1950-2015",
           popupTemplate: {
             title: "{Name}",
             content: [
               {
                 type: "text",
-                text: "Category {Category} storm with that occurred at {ISO_time}."
+                text: "Ouragan de catégorie {Category} observé le {ISO_time}."
               },
               {
                 type: "fields",
                 fieldInfos: [
                   {
-                    fieldName: "wmo_pres",
-                    label: "Pressure"
+                    fieldName: "expression/vent",
+                    label: "Vitesse du vent"
                   },
                   {
-                    fieldName: "wmo_wind",
-                    label: "Wind Speed (mph)"
+                    fieldName: "expression/pression",
+                    label: "Pression au centre"
                   }
                 ]
               }
@@ -63,65 +213,229 @@
                   dateFormat: "short-date-short-time"
                 }
               }
+            ],
+            expressionInfos: [
+              {
+                name: "vent",
+                title: "Vitesse du vent",
+                // wmo_wind est exprimé en nœuds dans IBTrACS (le minimum du fichier,
+                // 64 kt, est le seuil de catégorie 1) : on le dit, et on convertit.
+                expression: [
+                  "var kt = $feature.wmo_wind;",
+                  'IIf(IsEmpty(kt) || kt <= 0, "non renseignée",',
+                  '  Text(Round(kt)) + " nœuds (" + Text(Round(kt * 1.852)) + " km/h)")'
+                ].join("\n")
+              },
+              {
+                name: "pression",
+                title: "Pression au centre",
+                // 0 est la valeur sentinelle « pression non mesurée » d'IBTrACS
+                // (16 % des positions) : l'afficher telle quelle se lirait 0 hPa.
+                expression: [
+                  "var p = $feature.wmo_pres;",
+                  'IIf(IsEmpty(p) || p <= 0, "non renseignée", Text(Round(p)) + " hPa")'
+                ].join("\n")
+              }
             ]
           },
-          renderer: {
+          renderer: createRenderer(true)
+        });
+
+        // Les symboles « firefly » viennent du même dépôt d'exemples que le CSV. S'ils
+        // disparaissent, les points sont dessinés mais invisibles, sans le moindre signal :
+        // on vérifie une image et on bascule sinon sur des cercles colorés équivalents.
+        loadImage(SAMPLE_DATA_URL + CATEGORIES[0].image).catch(() => {
+          csvLayer.renderer = createRenderer(false);
+          showMessage(
+            "Symboles d'origine (arcgis.github.io) indisponibles : rendu de repli en cercles colorés."
+          );
+        });
+
+        // Le fond de carte porte la projection de la vue : on le charge avant de créer
+        // celle-ci, pour pouvoir basculer sur un fond standard s'il ne répond pas,
+        // plutôt que de laisser un écran noir muet.
+        const polarBasemap = new Basemap({
+          portalItem: {
+            id: BASEMAP_ITEM_ID
+          }
+        });
+
+        polarBasemap.load().then(
+          () => start(polarBasemap),
+          (err) => {
+            start(FALLBACK_BASEMAP);
+            showMessage(
+              "Fond de carte polaire indisponible (" + errorText(err) +
+                ") : repli sur un fond satellite en projection Web Mercator, la reprojection polaire n'est pas démontrée."
+            );
+          }
+        );
+
+        /**
+         * Construit la carte et la vue à partir du fond de carte retenu, puis charge la
+         * couche CSV. Celle-ci n'est ajoutée qu'une fois chargée : si le fichier ne
+         * répond pas, message visible plutôt qu'échec silencieux.
+         */
+        function start(basemap) {
+          const map = new WebMap({
+            // le fond de carte est en projection stéréographique polaire sud ;
+            // les coordonnées du CSVLayer sont reprojetées côté client par le
+            // Projection Engine pour rejoindre la référence spatiale de la vue
+            basemap: basemap
+          });
+
+          const view = new MapView({
+            container: "viewDiv",
+            map: map,
+            highlightOptions: {
+              color: "#ff642e",
+              haloOpacity: 1,
+              fillOpacity: 0.25
+            },
+            popup: {
+              dockEnabled: true,
+              dockOptions: {
+                breakpoint: false
+              }
+            }
+          });
+
+          // Un fond de carte peut se déclarer chargé et ses tuiles rester muettes :
+          // on le dit plutôt que de laisser croire à un fond noir volontaire.
+          map.basemap
+            .load()
+            .then((loaded) => {
+              loaded.baseLayers.forEach((layer) => layer.when(null, notifyBasemapFailure));
+            })
+            .catch(notifyBasemapFailure);
+
+          csvLayer
+            .load()
+            .then(() => {
+              map.add(csvLayer);
+              return view.whenLayerView(csvLayer);
+            })
+            .then(whenFirstRenderDone)
+            .then(() => {
+              loading.hidden = true;
+              return csvLayer.queryFeatureCount();
+            })
+            .then((total) => {
+              // Le CSVLayer écarte sans le dire les lignes dépourvues de coordonnées
+              // (4 dans le fichier actuel) : on affiche le nombre réellement chargé.
+              count.textContent =
+                total.toLocaleString("fr-FR") +
+                " positions chargées (les lignes sans coordonnées sont ignorées).";
+              count.hidden = false;
+            })
+            .catch((err) => {
+              showMessage("Données IBTrACS (hurricanes.csv, arcgis.github.io) indisponibles : " + errorText(err));
+            });
+
+          view
+            .when(() => {
+              try {
+                setupUI(view);
+              } catch (err) {
+                // Carte fonctionnelle, seuls des widgets manquent : pas de bandeau trompeur.
+                console.error("Câblage de l'interface incomplet : " + errorText(err));
+              }
+            })
+            .catch((err) => {
+              showMessage("Carte indisponible : " + errorText(err));
+            });
+        }
+
+        /**
+         * Attend la fin du premier affichage des points. On exige d'abord le passage à
+         * l'état « en cours » : sans cela, un abonnement arrivant avant le début du
+         * dessin verrait updating === false et masquerait le voile trop tôt. Garde-fou
+         * de délai pour que le voile disparaisse même si cet enchaînement est manqué.
+         */
+        function whenFirstRenderDone(layerView) {
+          const firstUpdate = reactiveUtils
+            .whenOnce(() => layerView.updating)
+            .then(() => reactiveUtils.whenOnce(() => !layerView.updating));
+          const guard = new Promise((resolve) => setTimeout(resolve, LOADING_GUARD_MS));
+          return Promise.race([firstUpdate, guard]);
+        }
+
+        function setupUI(view) {
+          const legendExpand = new Expand({
+            view: view,
+            content: new Legend({
+              view: view,
+              style: "card"
+            }),
+            expandTooltip: "Afficher la légende",
+            collapseTooltip: "Masquer la légende"
+          });
+          view.ui.add(legendExpand, "top-left");
+
+          // Contexte du jeu de données : replié sur petit écran, où il couvrirait la carte.
+          const infoExpand = new Expand({
+            view: view,
+            content: info,
+            expandIconClass: "esri-icon-description",
+            expandTooltip: "À propos de cette carte",
+            collapseTooltip: "Masquer les informations",
+            expanded: view.widthBreakpoint !== "xsmall"
+          });
+          view.ui.add(infoExpand, "top-right");
+          info.hidden = false;
+        }
+
+        /**
+         * Rendu par catégorie Saffir-Simpson. Avec les images « firefly » d'origine, ou
+         * à défaut avec des cercles colorés de taille croissante, de mêmes classes.
+         */
+        function createRenderer(withImages) {
+          return {
             type: "unique-value",
             field: "Category",
-            uniqueValueInfos: createUniqueValueInfos()
-          }
-        });
-
-        const map = new WebMap({
-          // contains a basemap with a South Pole Stereographic projection
-          // the CSVLayer coordinates will re-project client-side
-          // with the Projection Engine to match the view's Spatial Reference
-          basemap: {
-            portalItem: {
-              id: "3113eacc129942b4abde490a51aeb33f"
-            }
-          },
-          layers: [csvLayer]
-        });
-
-        const view = new MapView({
-          container: "viewDiv",
-          map: map,
-          highlightOptions: {
-            color: "#ff642e",
-            haloOpacity: 1,
-            fillOpacity: 0.25
-          },
-          popup: {
-            dockEnabled: true,
-            dockOptions: {
-              breakpoint: false
-            }
-          }
-        });
-
-        const legendExpand = new Expand({
-          view: view,
-          content: new Legend({
-            view: view,
-            style: "card"
-          })
-        });
-        view.ui.add(legendExpand, "top-left");
-
-        function createUniqueValueInfos() {
-          const fireflyImages = ["cat1.png", "cat2.png", "cat3.png", "cat4.png", "cat5.png"];
-
-          const baseUrl = "https://arcgis.github.io/arcgis-samples-javascript/sample-data/";
-
-          return fireflyImages.map((url, i) => {
-            return {
-              value: i + 1, // Category number
-              symbol: {
-                type: "picture-marker",
-                url: baseUrl + url
+            legendOptions: {
+              title: "Catégorie (vent maximal soutenu)"
+            },
+            uniqueValueInfos: CATEGORIES.map((category) => {
+              return {
+                value: category.value, // Category number
+                label: category.label,
+                symbol: withImages
+                  ? {
+                      type: "picture-marker",
+                      url: SAMPLE_DATA_URL + category.image
+                    }
+                  : {
+                      type: "simple-marker",
+                      style: "circle",
+                      size: category.size,
+                      color: category.color,
+                      outline: null
+                    }
+              };
+            }),
+            // La source ne contient aujourd'hui que des catégories 1 à 5, mais IBTrACS
+            // publie aussi dépressions et tempêtes tropicales : sans symbole par défaut,
+            // elles deviendraient invisibles sans le moindre signal.
+            defaultSymbol: {
+              type: "simple-marker",
+              size: 4,
+              color: [170, 170, 170, 0.9],
+              outline: {
+                color: [255, 255, 255, 0.4],
+                width: 0.5
               }
-            };
+            },
+            defaultLabel: "Hors échelle Saffir-Simpson"
+          };
+        }
+
+        function loadImage(src) {
+          return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(src);
+            image.onerror = () => reject(new Error("image indisponible : " + src));
+            image.src = src;
           });
         }
       });
@@ -129,6 +443,27 @@
   </head>
 
   <body>
-    <div id="viewDiv"></div>
+    <h1 id="title">Trajectoires d'ouragans IBTrACS/NOAA (1950-2015) en projection stéréographique polaire sud</h1>
+    <div id="viewDiv" role="application"
+      aria-label="Carte des trajectoires d'ouragans en projection stéréographique polaire sud"></div>
+    <div id="loading" role="status">Chargement des trajectoires…</div>
+    <p id="message" role="alert" hidden></p>
+    <div id="info" hidden>
+      <h2>Ouragans IBTrACS / NOAA</h2>
+      <p>Positions relevées toutes les 6 heures pour les cyclones de catégorie 1 à 5, de 1950 à 2015.
+        Les dépressions et tempêtes tropicales (moins de 64 nœuds) sont absentes de la source.</p>
+      <p id="count" hidden></p>
+      <p>Les coordonnées WGS84 du fichier sont reprojetées côté client, à la volée, vers la
+        projection stéréographique polaire sud du fond de carte : c'est l'objet de cette
+        démonstration. L'essentiel des trajectoires se situe dans l'hémisphère nord, là où
+        cette projection déforme le plus — l'étirement en périphérie est attendu et la carte
+        ne vaut pas support d'analyse.</p>
+      <p class="credit">D'après l'exemple Esri « CSVLayer - Project points on the fly ».
+        Données IBTrACS / NOAA, fond de carte « Firefly » d'Esri.</p>
+    </div>
+    <noscript>
+      <p id="noscript">Cette carte nécessite JavaScript : les trajectoires d'ouragans sont
+        chargées et reprojetées dans le navigateur.</p>
+    </noscript>
   </body>
 </html>
