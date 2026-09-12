@@ -2,12 +2,18 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>🇫🇷 Médailles françaises aux JO depuis 2000</title>
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/dark/main.css">
   <script src="https://js.arcgis.com/4.30/"></script>
   <style>
     html, body, #viewDiv { padding:0; margin:0; height:100%; width:100%; }
+    /* fond sombre sous la carte : évite l'écran blanc pendant le chargement
+       et si le fond de carte ne répond pas */
+    #viewDiv { background:#0d0a18; }
+
+    /* teinte secondaire — contraste AA sur le fond sombre du panneau */
+    :root { --muted:#9b90ad; }
 
     /* ── Left panel ── */
     #panel {
@@ -28,7 +34,7 @@
       flex-shrink: 0;
     }
     #ph h1 { font-size:15px; font-weight:800; color:white; margin:0 0 3px; }
-    #ph .sub { font-size:11px; color:#7a6f8a; }
+    #ph .sub { font-size:11px; color:var(--muted); }
 
     /* KPIs */
     .kpis {
@@ -43,7 +49,7 @@
       border-radius:8px; padding:9px 12px;
     }
     .kpi .kv { font-size:22px; font-weight:800; font-family:monospace; line-height:1; }
-    .kpi .kl { font-size:9px; color:#7a6f8a; text-transform:uppercase; letter-spacing:.5px; margin-top:3px; }
+    .kpi .kl { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:3px; }
     .kpi.gold   .kv { color:#FFD700; }
     .kpi.silver .kv { color:#C0C8D4; }
     .kpi.bronze .kv { color:#CD7F32; }
@@ -56,7 +62,7 @@
       flex-shrink:0;
       display:flex; flex-direction:column; gap:9px;
     }
-    .fl { font-size:9px; color:#7a6f8a; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
+    .fl { font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px; }
     .btngrp { display:flex; gap:4px; }
     .btngrp button {
       flex:1; padding:6px 4px; border-radius:5px;
@@ -81,10 +87,14 @@
     #elist::-webkit-scrollbar-track { background:transparent; }
     #elist::-webkit-scrollbar-thumb { background:rgba(255,255,255,.12); border-radius:2px; }
 
+    /* chaque ligne est un <button> : focusable et activable au clavier */
     .erow {
       display:flex; align-items:center; gap:10px;
+      width:100%; box-sizing:border-box;
       padding:9px 18px; cursor:pointer;
-      border-bottom:1px solid rgba(255,255,255,.04);
+      border:0; border-bottom:1px solid rgba(255,255,255,.04);
+      background:transparent; color:inherit;
+      font-family:inherit; text-align:left;
       transition:background .12s;
     }
     .erow:hover { background:rgba(255,255,255,.05); }
@@ -92,23 +102,59 @@
     .erow.hidden { display:none; }
     .eico { font-size:14px; flex-shrink:0; width:22px; text-align:center; }
     .einfo { flex:1; min-width:0; }
-    .einfo .ey { font-size:13px; font-weight:700; color:white; }
-    .einfo .ec { font-size:10px; color:#7a6f8a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .einfo .ey { display:block; font-size:13px; font-weight:700; color:white; }
+    .einfo .ec { display:block; font-size:10px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
     .emedals { display:flex; gap:5px; font-size:11px; font-family:monospace; flex-shrink:0; }
     .emedals .g { color:#FFD700; }
     .emedals .s { color:#C0C8D4; }
     .emedals .b { color:#CD7F32; }
     .emedals .t { color:#7EB3FF; font-weight:700; min-width:28px; text-align:right; }
 
-    /* Source */
+    /* focus clavier visible sur le thème sombre */
+    .erow:focus-visible,
+    .btngrp button:focus-visible,
+    #source a:focus-visible { outline:2px solid #7EB3FF; outline-offset:-2px; }
+
+    /* Source — ancré à gauche de la carte pour ne plus recouvrir les widgets Esri */
     #source {
-      position:absolute; bottom:28px; right:15px; z-index:10;
+      position:absolute; bottom:28px; left:345px; z-index:10;
       background:rgba(8,6,18,.85);
       border:1px solid rgba(255,255,255,.07);
       border-radius:6px; padding:6px 12px;
-      font-size:10px; color:#7a6f8a; font-family:sans-serif;
+      font-size:10px; color:var(--muted); font-family:sans-serif;
+      pointer-events:none;
     }
-    #source a { color:#d4a017; text-decoration:none; }
+    #source a { color:#d4a017; text-decoration:none; pointer-events:auto; }
+
+    /* Message d'état de la carte (chargement / indisponibilité) */
+    #mapmsg {
+      position:absolute; left:calc(50% + 165px); top:50%; transform:translate(-50%,-50%);
+      z-index:5; max-width:70%; text-align:center;
+      padding:10px 16px; border-radius:8px;
+      background:rgba(8,6,18,.9); border:1px solid rgba(255,255,255,.12);
+      color:#e8e0d5; font-size:12px; line-height:1.5;
+      font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      pointer-events:none;
+    }
+    #mapmsg.err { border-color:rgba(255,140,140,.45); color:#ffb4b4; }
+    #mapmsg.hidden { display:none; }
+
+    /* ── Mobile : le panneau passe en feuille inférieure, la carte garde le haut ── */
+    @media (max-width: 760px) {
+      #panel {
+        top:auto; left:0; right:0; bottom:0; width:100%; height:52vh;
+        border-right:none; border-top:1px solid rgba(255,255,255,.07);
+      }
+      #ph { padding:12px 14px 10px; }
+      #ph h1 { font-size:14px; }
+      .kpis { padding:10px 14px; gap:5px; }
+      .kpi { padding:7px 10px; }
+      .kpi .kv { font-size:19px; }
+      #filters { padding:8px 14px 10px; gap:7px; }
+      .erow { padding:8px 14px; }
+      #source { bottom:auto; top:8px; left:8px; }
+      #mapmsg { left:50%; top:22%; max-width:86%; }
+    }
   </style>
 </head>
 <body>
@@ -142,86 +188,222 @@
 
   <div id="filters">
     <div>
-      <div class="fl">Type de Jeux</div>
-      <div class="btngrp" id="typeGrp">
-        <button class="active" data-val="all">Tous</button>
-        <button data-val="été">🌞 Été</button>
-        <button data-val="hiver">❄️ Hiver</button>
+      <div class="fl" id="fl-type">Type de Jeux</div>
+      <div class="btngrp" id="typeGrp" role="group" aria-labelledby="fl-type">
+        <button type="button" class="active" data-val="all" aria-pressed="true">Tous</button>
+        <button type="button" data-val="été" aria-pressed="false">🌞 Été</button>
+        <button type="button" data-val="hiver" aria-pressed="false">❄️ Hiver</button>
       </div>
     </div>
     <div>
-      <div class="fl">Taille des bulles</div>
-      <div class="btngrp" id="medalGrp">
-        <button class="active gold" data-val="gold">🥇 Or</button>
-        <button data-val="silver">🥈 Argent</button>
-        <button data-val="bronze">🥉 Bronze</button>
-        <button data-val="total">🏅 Total</button>
+      <div class="fl" id="fl-medal">Taille des bulles</div>
+      <div class="btngrp" id="medalGrp" role="group" aria-labelledby="fl-medal">
+        <button type="button" class="active gold" data-val="gold" aria-pressed="true">🥇 Or</button>
+        <button type="button" data-val="silver" aria-pressed="false">🥈 Argent</button>
+        <button type="button" data-val="bronze" aria-pressed="false">🥉 Bronze</button>
+        <button type="button" data-val="total" aria-pressed="false">🏅 Total</button>
       </div>
     </div>
   </div>
 
-  <div id="elist"></div>
+  <div id="elist" role="group" aria-label="Éditions"></div>
 </div>
 
 <div id="source">
-  Sources : <a href="https://olympics.com/fr/équipes/france" target="_blank">olympics.com</a>
-  · <a href="https://www.olympedia.org/" target="_blank">Olympedia</a>
+  Sources : <a href="https://olympics.com/fr/" target="_blank" rel="noopener noreferrer">olympics.com</a>
+  · <a href="https://www.olympedia.org/countries/FRA" target="_blank" rel="noopener noreferrer">Olympedia</a>
 </div>
 
+<div id="mapmsg">Chargement de la carte…</div>
+
 <script>
+/* ══════════════════════════════════════════════════════════════════════
+   Données + panneau — 100 % local, rendu sans attendre l'API carto
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ══ Données — médailles françaises (source officielle CIO / Olympedia) ══ */
+var ED = [
+  // ── Jeux d'été ──
+  { id:"s2000", year:2000, city:"Sydney",         country:"Australie",    type:"été",   e:"🌞",
+    c:[151.209,-33.869], gold:13, silver:14, bronze:11 },
+  { id:"s2004", year:2004, city:"Athènes",        country:"Grèce",        type:"été",   e:"🌞",
+    c:[23.728,37.984],   gold:11, silver:9,  bronze:13 },
+  { id:"s2008", year:2008, city:"Pékin",          country:"Chine",        type:"été",   e:"🌞",
+    c:[116.407,39.904],  gold:7,  silver:16, bronze:18 },
+  { id:"s2012", year:2012, city:"Londres",        country:"Royaume-Uni",  type:"été",   e:"🌞",
+    c:[-0.128,51.507],   gold:11, silver:11, bronze:12 },
+  { id:"s2016", year:2016, city:"Rio de Janeiro", country:"Brésil",       type:"été",   e:"🌞",
+    c:[-43.173,-22.907], gold:10, silver:18, bronze:14 },
+  { id:"s2020", year:2020, city:"Tokyo",          country:"Japon",        type:"été",   e:"🌞",
+    c:[139.692,35.690],  gold:10, silver:12, bronze:11 },
+  { id:"s2024", year:2024, city:"Paris",          country:"France",       type:"été",   e:"🌞",
+    c:[2.352,48.857],    gold:16, silver:26, bronze:22 },
+  // ── Jeux d'hiver ──
+  { id:"w2002", year:2002, city:"Salt Lake City", country:"États-Unis",   type:"hiver", e:"❄️",
+    c:[-111.891,40.761], gold:4,  silver:5,  bronze:2  },
+  { id:"w2006", year:2006, city:"Turin",          country:"Italie",       type:"hiver", e:"❄️",
+    c:[7.687,45.070],    gold:3,  silver:2,  bronze:4  },
+  { id:"w2010", year:2010, city:"Vancouver",      country:"Canada",       type:"hiver", e:"❄️",
+    c:[-123.121,49.283], gold:2,  silver:3,  bronze:6  },
+  { id:"w2014", year:2014, city:"Sotchi",         country:"Russie",       type:"hiver", e:"❄️",
+    c:[39.720,43.599],   gold:4,  silver:4,  bronze:7  },
+  { id:"w2018", year:2018, city:"Pyeongchang",    country:"Corée du Sud", type:"hiver", e:"❄️",
+    c:[128.602,37.370],  gold:5,  silver:4,  bronze:6  },
+  { id:"w2022", year:2022, city:"Pékin",          country:"Chine",        type:"hiver", e:"❄️",
+    c:[116.85,39.60],    gold:5,  silver:7,  bronze:2  },
+];
+
+/* ══ State ══ */
+var activeType  = "all";
+var activeMedal = "gold";
+var activeId    = null;
+
+/* ══ Hooks carte — renseignés seulement si l'API ArcGIS a pu se charger ══ */
+var mapHooks = { draw:null, frame:null, focus:null };
+
+function getVal(ed) {
+  return activeMedal === "total" ? ed.gold + ed.silver + ed.bronze : ed[activeMedal];
+}
+
+function filterEds() {
+  return ED.filter(function(e) {
+    return activeType === "all" || e.type === activeType;
+  });
+}
+
+/* ══ Message d'état de la carte ══ */
+function setMapMsg(text, isError) {
+  var el = document.getElementById("mapmsg");
+  if (!el) return;
+  if (!text) { el.classList.add("hidden"); return; }
+  el.textContent = text;
+  el.classList.toggle("err", !!isError);
+  el.classList.remove("hidden");
+}
+
+/* ══ KPIs ══ */
+function updateKPIs(eds) {
+  var g = 0, s = 0, b = 0;
+  eds.forEach(function(e) { g += e.gold; s += e.silver; b += e.bronze; });
+  document.getElementById("kv-gold").textContent   = g;
+  document.getElementById("kv-silver").textContent = s;
+  document.getElementById("kv-bronze").textContent = b;
+  document.getElementById("kv-total").textContent  = g + s + b;
+}
+
+/* ══ Edition list ══ */
+function renderList(eds) {
+  var sorted = eds.slice().sort(function(a, b) { return b.year - a.year; });
+  var html = sorted.map(function(ed) {
+    var tot = ed.gold + ed.silver + ed.bronze;
+    var active = ed.id === activeId ? " active" : "";
+    var label = ed.city + ' ' + ed.year + ', ' + ed.country + ', ' +
+                tot + ' médailles : ' + ed.gold + ' or, ' + ed.silver + ' argent, ' + ed.bronze + ' bronze';
+    return '<button type="button" class="erow' + active + '" data-id="' + ed.id + '" aria-label="' + label + '">' +
+      '<span class="eico" aria-hidden="true">' + ed.e + '</span>' +
+      '<span class="einfo">' +
+        '<span class="ey">' + ed.city + ' ' + ed.year + '</span>' +
+        '<span class="ec">' + ed.country + '</span>' +
+      '</span>' +
+      '<span class="emedals" aria-hidden="true">' +
+        '<span class="g">' + ed.gold   + '🥇</span>' +
+        '<span class="s">' + ed.silver + '🥈</span>' +
+        '<span class="b">' + ed.bronze + '🥉</span>' +
+        '<span class="t">= ' + tot + '</span>' +
+      '</span>' +
+    '</button>';
+  }).join('');
+
+  var list = document.getElementById("elist");
+  list.innerHTML = html;
+
+  list.querySelectorAll(".erow").forEach(function(row) {
+    row.addEventListener("click", function() {
+      var id = this.dataset.id;
+      var ed = ED.find(function(e) { return e.id === id; });
+      if (!ed) return;
+      activeId = id;
+      list.querySelectorAll(".erow").forEach(function(r) { r.classList.remove("active"); });
+      this.classList.add("active");
+      if (mapHooks.focus) mapHooks.focus(ed);
+    });
+  });
+}
+
+/* ══ Rafraîchit panneau + carte ; reframe = recadrer sur la sélection ══ */
+function refresh(reframe) {
+  var eds = filterEds();
+  updateKPIs(eds);
+  renderList(eds);
+  if (mapHooks.draw)  mapHooks.draw(eds);
+  if (reframe && mapHooks.frame) mapHooks.frame(eds, true);
+}
+
+/* ══ Filter: type ══ */
+document.querySelectorAll("#typeGrp button").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    document.querySelectorAll("#typeGrp button").forEach(function(b) {
+      b.classList.remove("active");
+      b.setAttribute("aria-pressed", "false");
+    });
+    this.classList.add("active");
+    this.setAttribute("aria-pressed", "true");
+    activeType = this.dataset.val;
+    activeId = null;
+    refresh(true);
+  });
+});
+
+/* ══ Filter: medal ══ */
+document.querySelectorAll("#medalGrp button").forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    document.querySelectorAll("#medalGrp button").forEach(function(b) {
+      b.classList.remove("active", "gold", "silver", "bronze", "total");
+      b.setAttribute("aria-pressed", "false");
+    });
+    this.classList.add("active", this.dataset.val);
+    this.setAttribute("aria-pressed", "true");
+    activeMedal = this.dataset.val;
+    refresh(false);
+  });
+});
+
+/* KPI + liste disponibles immédiatement, avant même le chargement de la carte */
+refresh(false);
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   Carte — dégradation gracieuse si l'API ArcGIS n'est pas joignable
+   ══════════════════════════════════════════════════════════════════════ */
+if (typeof require !== "function") {
+  setMapMsg("Carte indisponible : l'API cartographique n'a pas pu être chargée. Les médailles restent consultables dans le panneau.", true);
+} else {
 require([
   "esri/Map",
   "esri/views/MapView",
   "esri/layers/GraphicsLayer",
   "esri/Graphic",
-  "esri/widgets/Home",
-  "esri/widgets/Zoom"
-], function(Map, MapView, GraphicsLayer, Graphic, Home, Zoom) {
+  "esri/geometry/Extent",
+  "esri/widgets/Home"
+], function(Map, MapView, GraphicsLayer, Graphic, Extent, Home) {
 
-  /* ══ Données — médailles françaises (source officielle CIO / Olympedia) ══ */
-  const ED = [
-    // ── Jeux d'été ──
-    { id:"s2000", year:2000, city:"Sydney",         country:"Australie",    type:"été",   e:"🌞",
-      c:[151.209,-33.869], gold:13, silver:14, bronze:11 },
-    { id:"s2004", year:2004, city:"Athènes",        country:"Grèce",        type:"été",   e:"🌞",
-      c:[23.728,37.984],   gold:11, silver:9,  bronze:13 },
-    { id:"s2008", year:2008, city:"Pékin",          country:"Chine",        type:"été",   e:"🌞",
-      c:[116.407,39.904],  gold:7,  silver:16, bronze:18 },
-    { id:"s2012", year:2012, city:"Londres",        country:"Royaume-Uni",  type:"été",   e:"🌞",
-      c:[-0.128,51.507],   gold:11, silver:11, bronze:12 },
-    { id:"s2016", year:2016, city:"Rio de Janeiro", country:"Brésil",       type:"été",   e:"🌞",
-      c:[-43.173,-22.907], gold:10, silver:18, bronze:14 },
-    { id:"s2020", year:2020, city:"Tokyo",          country:"Japon",        type:"été",   e:"🌞",
-      c:[139.692,35.690],  gold:10, silver:12, bronze:11 },
-    { id:"s2024", year:2024, city:"Paris",          country:"France",       type:"été",   e:"🌞",
-      c:[2.352,48.857],    gold:16, silver:26, bronze:22 },
-    // ── Jeux d'hiver ──
-    { id:"w2002", year:2002, city:"Salt Lake City", country:"États-Unis",   type:"hiver", e:"❄️",
-      c:[-111.891,40.761], gold:4,  silver:5,  bronze:2  },
-    { id:"w2006", year:2006, city:"Turin",          country:"Italie",       type:"hiver", e:"❄️",
-      c:[7.687,45.070],    gold:3,  silver:2,  bronze:4  },
-    { id:"w2010", year:2010, city:"Vancouver",      country:"Canada",       type:"hiver", e:"❄️",
-      c:[-123.121,49.283], gold:2,  silver:3,  bronze:6  },
-    { id:"w2014", year:2014, city:"Sotchi",         country:"Russie",       type:"hiver", e:"❄️",
-      c:[39.720,43.599],   gold:4,  silver:4,  bronze:7  },
-    { id:"w2018", year:2018, city:"Pyeongchang",    country:"Corée du Sud", type:"hiver", e:"❄️",
-      c:[128.602,37.370],  gold:5,  silver:4,  bronze:6  },
-    { id:"w2022", year:2022, city:"Pékin",          country:"Chine",        type:"hiver", e:"❄️",
-      c:[116.85,39.60],    gold:5,  silver:7,  bronze:2  },
-  ];
-
-  /* ══ State ══ */
-  var activeType  = "all";
-  var activeMedal = "gold";
-  var activeId    = null;
+  /* ══ Padding de la vue — dépend du placement du panneau ══ */
+  function viewPadding() {
+    return window.innerWidth <= 760
+      ? { left:0,   bottom:Math.round(window.innerHeight * 0.52) }
+      : { left:330, bottom:0 };
+  }
 
   /* ══ Map ══ */
   const map  = new Map({ basemap: "dark-gray-vector" });
   const view = new MapView({
     map: map, container: "viewDiv",
-    center: [30, 25], zoom: 2,
-    padding: { left: 330 },
-    constraints: { rotationEnabled: false },
+    center: [20, 22], zoom: 1,
+    padding: viewPadding(),
+    // snapToZoom désactivé : sinon le cadrage calculé est arrondi au palier de
+    // zoom supérieur, ce qui rogne les éditions situées aux extrémités.
+    constraints: { rotationEnabled: false, snapToZoom: false },
     popup: { dockEnabled: true, dockOptions: { position: "bottom-right", breakpoint: false } }
   });
 
@@ -237,25 +419,26 @@ require([
     total:  [126, 179, 255]
   };
 
-  function getVal(ed) {
-    return activeMedal === "total" ? ed.gold + ed.silver + ed.bronze : ed[activeMedal];
-  }
-
   /* ══ Draw bubbles ══ */
-  function draw() {
+  function draw(eds) {
     circleLayer.removeAll();
     labelLayer.removeAll();
+    if (!eds.length) return;
 
-    var eds = ED.filter(function(e) {
-      return activeType === "all" || e.type === activeType;
-    });
-
-    var maxVal = Math.max.apply(null, eds.map(getVal));
+    var maxVal = Math.max.apply(null, eds.map(getVal)) || 1;
     var c = COL[activeMedal];
+    // bulles plus compactes sur écran étroit : la carte y est deux fois plus petite
+    var narrow = window.innerWidth <= 760;
+    var base   = narrow ? 12 : 16;
+    var span   = narrow ? 26 : 38;
 
-    eds.forEach(function(ed) {
+    // grandes bulles dessinées d'abord : les petites restent visibles au-dessus
+    var ordered = eds.slice().sort(function(a, b) { return getVal(b) - getVal(a); });
+    var placed  = [];   // points déjà étiquetés, pour repérer les superpositions
+
+    ordered.forEach(function(ed) {
       var val  = getVal(ed);
-      var size = val === 0 ? 0 : Math.max(16, 16 + (val / maxVal) * 38);
+      var size = Math.max(base, base + (val / maxVal) * span);
       var tot  = ed.gold + ed.silver + ed.bronze;
 
       circleLayer.add(new Graphic({
@@ -269,7 +452,7 @@ require([
         attributes: { _id: ed.id },
         popupTemplate: {
           title: ed.e + " " + ed.city + " " + ed.year +
-                 (ed.type === "hiver" ? " &nbsp;<small style='color:#7a6f8a'>Hiver</small>" : " &nbsp;<small style='color:#7a6f8a'>Été</small>"),
+                 (ed.type === "hiver" ? " &nbsp;<small style='color:#9b90ad'>Hiver</small>" : " &nbsp;<small style='color:#9b90ad'>Été</small>"),
           content: "<div style='font-family:monospace;font-size:13px;line-height:2.2'>" +
             "🥇 Or     : <b style='color:#FFD700'>" + ed.gold   + "</b><br>" +
             "🥈 Argent : <b style='color:#C0C8D4'>" + ed.silver + "</b><br>" +
@@ -281,67 +464,47 @@ require([
       }));
 
       if (val > 0) {
+        // deux éditions quasi au même point (Pékin 2008 / Pékin 2022) : la seconde
+        // étiquette est remontée au-dessus de la bulle pour rester lisible
+        var clash = placed.some(function(p) {
+          return Math.abs(p[0] - ed.c[0]) < 1.5 && Math.abs(p[1] - ed.c[1]) < 1.5;
+        });
+        placed.push(ed.c);
+
         labelLayer.add(new Graphic({
           geometry: { type: "point", longitude: ed.c[0], latitude: ed.c[1] },
           symbol: {
             type: "text", text: String(val),
             color: "white",
-            haloColor: "rgba(0,0,0,0.8)", haloSize: 1.5,
-            font: { size: Math.max(9, Math.min(14, size * 0.32)), weight: "bold" }
+            haloColor: "rgba(0,0,0,0.95)", haloSize: 2.5,
+            yoffset: clash ? Math.round(size / 2) + 8 : 0,
+            font: { size: Math.max(narrow ? 9 : 10, Math.min(14, size * 0.32)), weight: "bold" }
           }
         }));
       }
     });
-
-    updateKPIs(eds);
-    renderList(eds);
   }
 
-  /* ══ KPIs ══ */
-  function updateKPIs(eds) {
-    var g = 0, s = 0, b = 0;
-    eds.forEach(function(e) { g += e.gold; s += e.silver; b += e.bronze; });
-    document.getElementById("kv-gold").textContent   = g;
-    document.getElementById("kv-silver").textContent = s;
-    document.getElementById("kv-bronze").textContent = b;
-    document.getElementById("kv-total").textContent  = g + s + b;
-  }
-
-  /* ══ Edition list ══ */
-  function renderList(eds) {
-    var sorted = eds.slice().sort(function(a, b) { return b.year - a.year; });
-    var html = sorted.map(function(ed) {
-      var tot = ed.gold + ed.silver + ed.bronze;
-      var active = ed.id === activeId ? " active" : "";
-      return '<div class="erow' + active + '" data-id="' + ed.id + '">' +
-        '<div class="eico">' + ed.e + '</div>' +
-        '<div class="einfo">' +
-          '<div class="ey">' + ed.city + ' ' + ed.year + '</div>' +
-          '<div class="ec">' + ed.country + '</div>' +
-        '</div>' +
-        '<div class="emedals">' +
-          '<span class="g">' + ed.gold   + '🥇</span>' +
-          '<span class="s">' + ed.silver + '🥈</span>' +
-          '<span class="b">' + ed.bronze + '🥉</span>' +
-          '<span class="t">= ' + tot + '</span>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-
-    var list = document.getElementById("elist");
-    list.innerHTML = html;
-
-    list.querySelectorAll(".erow").forEach(function(row) {
-      row.addEventListener("click", function() {
-        var id = this.dataset.id;
-        var ed = ED.find(function(e) { return e.id === id; });
-        if (!ed) return;
-        activeId = id;
-        list.querySelectorAll(".erow").forEach(function(r) { r.classList.remove("active"); });
-        this.classList.add("active");
-        view.goTo({ center: ed.c, zoom: 5 }, { duration: 700, easing: "ease-in-out" });
-      });
+  /* ══ Cadrage sur les éditions affichées (au lieu d'une emprise figée) ══ */
+  function frame(eds, animate) {
+    if (!eds.length) return;
+    var lons = eds.map(function(e) { return e.c[0]; });
+    var lats = eds.map(function(e) { return e.c[1]; });
+    var ext = new Extent({
+      xmin: Math.max(-179, Math.min.apply(null, lons) - 15),
+      xmax: Math.min( 179, Math.max.apply(null, lons) + 15),
+      ymin: Math.max( -80, Math.min.apply(null, lats) - 12),
+      ymax: Math.min(  80, Math.max.apply(null, lats) + 12),
+      spatialReference: { wkid: 4326 }
     });
+    view.goTo(ext, animate ? { duration: 600, easing: "ease-in-out" } : { animate: false })
+        .catch(function() { /* goTo interrompu par l'utilisateur : sans conséquence */ });
+  }
+
+  /* ══ Zoom sur une édition depuis la liste ══ */
+  function focusEdition(ed) {
+    view.goTo({ center: ed.c, zoom: 5 }, { duration: 700, easing: "ease-in-out" })
+        .catch(function() {});
   }
 
   /* ══ Click on map bubble ══ */
@@ -357,38 +520,49 @@ require([
     });
   });
 
-  /* ══ Filter: type ══ */
-  document.querySelectorAll("#typeGrp button").forEach(function(btn) {
-    btn.addEventListener("click", function() {
-      document.querySelectorAll("#typeGrp button").forEach(function(b) { b.classList.remove("active"); });
-      this.classList.add("active");
-      activeType = this.dataset.val;
-      activeId = null;
-      draw();
-    });
+  /* ══ Le padding suit le passage desktop / mobile ══ */
+  var resizeTimer = null;
+  window.addEventListener("resize", function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(function() {
+      view.padding = viewPadding();
+      draw(filterEds());   // la taille des bulles dépend de la largeur d'écran
+    }, 150);
   });
 
-  /* ══ Filter: medal ══ */
-  document.querySelectorAll("#medalGrp button").forEach(function(btn) {
-    btn.addEventListener("click", function() {
-      document.querySelectorAll("#medalGrp button").forEach(function(b) {
-        b.classList.remove("active", "gold", "silver", "bronze", "total");
-      });
-      this.classList.add("active", this.dataset.val);
-      activeMedal = this.dataset.val;
-      draw();
-    });
-  });
-
-  /* ══ Widgets ══ */
+  /* ══ Widgets + premier rendu ══ */
   view.when(function() {
-    view.ui.remove("zoom");
-    view.ui.add(new Zoom({ view: view }), { position: "bottom-right", index: 0 });
-    view.ui.add(new Home({ view: view }), { position: "bottom-right", index: 1 });
-    draw();
+    setMapMsg(null);
+    view.ui.move("zoom", "bottom-right");
+    view.ui.add(new Home({ view: view }), "bottom-right");
+
+    // Les étiquettes de la basemap se dessinent au-dessus des couches
+    // opérationnelles en 4.x et masquent les valeurs des bulles : on les retire.
+    map.basemap.loadAll()
+      .then(function() {
+        map.basemap.referenceLayers.forEach(function(l) { l.visible = false; });
+        if (map.basemap.baseLayers.some(function(l) { return l.loadStatus === "failed"; })) {
+          setMapMsg("Fond de carte indisponible — les bulles restent positionnées et le panneau reste complet.", true);
+        }
+      })
+      .catch(function() {
+        setMapMsg("Fond de carte indisponible — les bulles restent positionnées et le panneau reste complet.", true);
+      });
+
+    mapHooks.draw  = draw;
+    mapHooks.frame = frame;
+    mapHooks.focus = focusEdition;
+
+    var eds = filterEds();
+    draw(eds);
+    frame(eds, false);
+  }, function(err) {
+    setMapMsg("Carte indisponible (" + (err && err.name ? err.name : "erreur de chargement") +
+              "). Les médailles restent consultables dans le panneau.", true);
   });
 
 });
+}
 </script>
 </body>
 </html>
