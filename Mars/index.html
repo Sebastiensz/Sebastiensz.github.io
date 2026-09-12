@@ -2,18 +2,27 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
-      name="viewport"
-      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+      name="description"
+      content="Scène 3D interactive de la planète Mars : relief MOLA/HRSC, imagerie MDIM 2.1 et cratères nommés de la nomenclature IAU."
     />
     <!--
   ArcGIS API for JavaScript, https://js.arcgis.com
   For more information about the mars sample, read the original sample description at developers.arcgis.com.
   https://developers.arcgis.com/javascript/latest/sample-code/mars/index.html
   -->
-<title>
-      Visualize data on Mars | Sample | ArcGIS API for JavaScript 4.18
-    </title>
+    <title>Mars — Scène 3D | Portfolio ArcGIS</title>
+
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%94%B4%3C/text%3E%3C/svg%3E"
+    />
+
+    <link rel="preconnect" href="https://js.arcgis.com" />
+    <link rel="preconnect" href="https://astro.arcgis.com" crossorigin />
+    <link rel="preconnect" href="https://services.arcgis.com" crossorigin />
+
     <style>
       html,
       body,
@@ -22,6 +31,107 @@
         margin: 0;
         height: 100%;
         width: 100%;
+      }
+
+      /* Titre réservé aux lecteurs d'écran */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* Indicateur de chargement, recyclé en message d'erreur si besoin.
+         La scène met plusieurs secondes à se texturer et les 1113 cratères
+         plusieurs dizaines de secondes à se dessiner : sans ce bandeau,
+         l'utilisateur ne voit qu'un écran blanc puis un globe nu. */
+      #etat {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        max-width: min(90vw, 28em);
+        z-index: 10;
+        padding: 0.9em 1.2em;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.95);
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+        font-family: "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
+        font-size: 0.95rem;
+        line-height: 1.4;
+        color: #323232;
+        text-align: center;
+        /* le bandeau ne doit jamais bloquer la navigation dans la scène */
+        pointer-events: none;
+      }
+
+      #etat.erreur {
+        border-left: 4px solid #a8452a;
+        text-align: left;
+      }
+
+      #etat p {
+        margin: 0 0 0.4em;
+      }
+
+      #etat p:last-child {
+        margin-bottom: 0;
+      }
+
+      /* Bandeau de contexte, crédit des données et retour au portfolio */
+      #infos {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 9;
+        max-width: min(80vw, 20em);
+        padding: 0.7em 0.9em;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        font-family: "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
+        font-size: 0.8rem;
+        line-height: 1.35;
+        color: #323232;
+      }
+
+      #infos p {
+        margin: 0 0 0.4em;
+      }
+
+      #infos .titre {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #a8452a;
+      }
+
+      #infos .credit {
+        margin: 0;
+        color: #6e6e6e;
+      }
+
+      #infos a {
+        color: #0079c1;
+      }
+
+      /* Sur petit écran, le bandeau doit masquer le moins de scène possible */
+      @media (max-width: 640px) {
+        #infos {
+          top: 10px;
+          right: 10px;
+          max-width: min(62vw, 16em);
+          padding: 0.5em 0.65em;
+          font-size: 0.7rem;
+        }
+
+        #infos .titre {
+          font-size: 0.8rem;
+        }
       }
     </style>
 
@@ -37,8 +147,90 @@
         "esri/views/SceneView",
         "esri/layers/ElevationLayer",
         "esri/layers/TileLayer",
-        "esri/layers/FeatureLayer"
-      ], function (Map, SceneView, ElevationLayer, TileLayer, FeatureLayer) {
+        "esri/layers/FeatureLayer",
+        "esri/widgets/LayerList",
+        "esri/widgets/Expand"
+      ], function (
+        Map,
+        SceneView,
+        ElevationLayer,
+        TileLayer,
+        FeatureLayer,
+        LayerList,
+        Expand
+      ) {
+        var etat = document.getElementById("etat");
+        var petitEcran = window.matchMedia("(max-width: 768px)").matches;
+        // Le bandeau central sert d'indicateur de chargement tant que tout va
+        // bien, et bascule en message d'erreur dès qu'une couche manque à
+        // l'appel. Les alertes sont indexées par couche pour pouvoir être
+        // levées si le service finit par répondre.
+        var alertes = {};
+        var chargement = "Chargement de la scène martienne…";
+
+        function rendre() {
+          var cles = Object.keys(alertes);
+          if (cles.length) {
+            etat.hidden = false;
+            etat.className = "erreur";
+            etat.innerHTML = cles
+              .map(function (cle) {
+                return "<p>" + alertes[cle] + "</p>";
+              })
+              .join("");
+            return;
+          }
+          etat.className = "";
+          etat.hidden = chargement === null;
+          if (chargement !== null) {
+            etat.textContent = chargement;
+          }
+        }
+
+        function patienter(message) {
+          chargement = message;
+          rendre();
+        }
+
+        function pret() {
+          chargement = null;
+          rendre();
+        }
+
+        function alerter(cle, message, erreur) {
+          alertes[cle] = message;
+          if (erreur) {
+            console.error(erreur);
+          }
+          rendre();
+        }
+
+        function lever(cle) {
+          delete alertes[cle];
+          rendre();
+        }
+
+        // Une couche injoignable ne rejette pas toujours : si le service ne
+        // répond simplement pas, elle reste indéfiniment en « loading » et
+        // l'échec passerait inaperçu. On surveille donc les deux cas.
+        var DELAI_COUCHE = 30000;
+
+        function surveiller(couche, cle, message) {
+          couche.when(
+            function () {
+              lever(cle);
+            },
+            function (erreur) {
+              alerter(cle, message, erreur);
+            }
+          );
+          window.setTimeout(function () {
+            if (couche.loadStatus !== "loaded") {
+              alerter(cle, message);
+            }
+          }, DELAI_COUCHE);
+        }
+
         const marsElevation = new ElevationLayer({
           url:
             "https://astro.arcgis.com/arcgis/rest/services/OnMars/MDEM200M/ImageServer",
@@ -49,7 +241,7 @@
         const marsImagery = new TileLayer({
           url:
             "https://astro.arcgis.com/arcgis/rest/services/OnMars/MDIM/MapServer",
-          title: "Imagery",
+          title: "Imagerie",
           copyright: "USGS Astrogeology Science Center, NASA, JPL, Esri"
         });
 
@@ -63,7 +255,9 @@
         const view = new SceneView({
           map: map,
           container: "viewDiv",
-          qualityProfile: "high",
+          // profil allégé sur mobile : « high » fait chauffer les téléphones
+          // pour un gain quasi nul sur un petit écran
+          qualityProfile: petitEcran ? "medium" : "high",
           // setting the spatial reference for Mars_2000 coordinate system
           spatialReference: {
             wkid: 104971
@@ -81,10 +275,61 @@
         });
 
         const cratersLayer = new FeatureLayer({
+          // couche 7 explicite : sans index, l'API résout implicitement vers la
+          // première couche du service public, qui pourrait changer sans préavis
           url:
-            "https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Mars_Nomenclature_Mountains/FeatureServer",
+            "https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services/Mars_Nomenclature_Mountains/FeatureServer/7",
           definitionExpression: "type = 'Crater, craters'",
-          title: "Craters",
+          title: "Cratères nommés",
+          outFields: [
+            "name",
+            "diameter",
+            "origin",
+            "quad_name",
+            "center_lat",
+            "center_lon",
+            "link"
+          ],
+          popupTemplate: {
+            title: "{name}",
+            expressionInfos: [
+              {
+                name: "fiche",
+                title: "Fiche de nomenclature",
+                // le service renvoie une URL en http, on la sert en https
+                expression: "Replace($feature.link, 'http://', 'https://')"
+              }
+            ],
+            content: [
+              {
+                type: "fields",
+                fieldInfos: [
+                  {
+                    fieldName: "diameter",
+                    label: "Diamètre (km)",
+                    format: { places: 1, digitSeparator: true }
+                  },
+                  {
+                    fieldName: "center_lat",
+                    label: "Latitude",
+                    format: { places: 2 }
+                  },
+                  {
+                    fieldName: "center_lon",
+                    label: "Longitude est",
+                    format: { places: 2 }
+                  },
+                  { fieldName: "quad_name", label: "Quadrangle" },
+                  { fieldName: "origin", label: "Origine du nom" }
+                ]
+              },
+              {
+                type: "text",
+                text:
+                  '<a href="{expression/fiche}" target="_blank" rel="noopener noreferrer">Fiche de nomenclature IAU / USGS</a>'
+              }
+            ]
+          },
           renderer: {
             type: "simple",
             symbol: {
@@ -118,7 +363,8 @@
                       color: [255, 255, 255, 0.7]
                     },
                     font: {
-                      size: 10
+                      // 10 px était illisible sur téléphone
+                      size: 12
                     }
                   }
                 ],
@@ -147,17 +393,144 @@
             "https://astro.arcgis.com/arcgis/rest/services/OnMars/MColorDEM/MapServer",
           copyright:
             "USGS Astrogeology Science Center, NASA, JPL, ESA, DLR, Esri",
-          title: "Shaded relief",
+          title: "Relief colorisé",
           visible: false
         });
 
-        map.add(shadedReliefLayer);
+        // inséré sous les cratères pour que les noms restent lisibles une fois
+        // le relief colorisé activé depuis la liste des couches
+        map.add(shadedReliefLayer, 1);
 
+        view.when(
+          function () {
+            // sans ce widget, la couche « Relief colorisé » reste chargée mais
+            // définitivement inatteignable pour l'utilisateur
+            var listeCouches = new LayerList({ view: view });
+            view.ui.add(
+              petitEcran
+                ? // déployée, la liste masquerait la moitié de l'écran d'un
+                  // téléphone : on la replie derrière un bouton
+                  new Expand({
+                    view: view,
+                    content: listeCouches,
+                    expandIconClass: "esri-icon-layers",
+                    expandTooltip: "Couches"
+                  })
+                : listeCouches,
+              "top-left"
+            );
+
+            // la scène est prête bien avant les 1113 cratères : on garde
+            // l'indicateur jusqu'à la fin de leur dessin
+            patienter("Chargement des cratères nommés…");
+
+            // filet de sécurité : le globe reste utilisable même si le dessin
+            // des cratères s'éternise
+            var filet = window.setTimeout(pret, 45000);
+
+            function termine() {
+              window.clearTimeout(filet);
+              pret();
+            }
+
+            view.whenLayerView(cratersLayer).then(function (layerView) {
+              if (!layerView.updating) {
+                termine();
+                return;
+              }
+              var suivi = layerView.watch("updating", function (enCours) {
+                if (!enCours) {
+                  suivi.remove();
+                  termine();
+                }
+              });
+            }, termine);
+          },
+          function (erreur) {
+            alerter(
+              "vue",
+              "La scène 3D n’a pas pu être initialisée : ce navigateur ou cet appareil ne semble pas prendre en charge WebGL.",
+              erreur
+            );
+          }
+        );
+
+        // Les quatre services martiens sont publics et hors de notre contrôle :
+        // si l'un d'eux tombe, on le dit au lieu d'afficher un globe blanc muet.
+        surveiller(
+          marsImagery,
+          "imagerie",
+          "L’imagerie de surface (MDIM 2.1) n’a pas pu être chargée : le globe s’affiche sans texture."
+        );
+
+        surveiller(
+          marsElevation,
+          "elevation",
+          "Le modèle d’élévation (MDEM200M) n’a pas pu être chargé : le globe s’affiche sans relief."
+        );
+
+        surveiller(
+          cratersLayer,
+          "crateres",
+          "La couche des cratères nommés n’a pas pu être chargée : aucun nom n’est affiché."
+        );
+
+        surveiller(
+          shadedReliefLayer,
+          "relief",
+          "Le relief colorisé (MColorDEM) n’a pas pu être chargé : cette couche restera vide."
+        );
+      }, function (erreur) {
+        var etat = document.getElementById("etat");
+        etat.className = "erreur";
+        etat.innerHTML =
+          "<p>L’API ArcGIS for JavaScript n’a pas pu être chargée.</p>";
+        console.error(erreur);
+      });
+    </script>
+
+    <script>
+      // Si le CDN Esri est injoignable, `require` n'existe pas : le script
+      // ci-dessus échoue dès sa première ligne et l'utilisateur resterait
+      // devant un « Chargement… » éternel. Ce garde-fou indépendant le dit.
+      window.addEventListener("DOMContentLoaded", function () {
+        if (typeof window.require !== "function") {
+          var etat = document.getElementById("etat");
+          etat.className = "erreur";
+          etat.innerHTML =
+            "<p>L’API ArcGIS for JavaScript (js.arcgis.com) n’a pas pu être chargée : la scène ne peut pas s’afficher.</p>";
+        }
       });
     </script>
   </head>
 
   <body>
-    <div id="viewDiv"></div>
+    <h1 class="sr-only">Mars — scène 3D</h1>
+
+    <div
+      id="viewDiv"
+      role="application"
+      aria-label="Scène 3D interactive de la planète Mars : relief, imagerie et cratères nommés"
+    ></div>
+
+    <div id="etat" role="status" aria-live="polite">
+      Chargement de la scène martienne…
+    </div>
+
+    <div id="infos">
+      <p class="titre">Mars — scène 3D</p>
+      <p>
+        Relief et imagerie de la planète rouge, avec les cratères nommés de la
+        nomenclature IAU. <a href="../">Retour au portfolio</a>
+      </p>
+      <p class="credit">
+        Données : USGS Astrogeology, NASA, ESA, JPL, Esri. D’après l’exemple
+        « Visualize data on Mars » d’Esri.
+      </p>
+    </div>
+
+    <noscript>
+      <p>Cette scène 3D nécessite JavaScript et WebGL pour s’afficher.</p>
+    </noscript>
   </body>
 </html>
