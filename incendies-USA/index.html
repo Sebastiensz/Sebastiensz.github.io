@@ -1,36 +1,146 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 
 <head>
-  <title>First WebMap</title>
-  <script src='https://js.arcgis.com/4.15'></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Carte interactive des grands feux de forêt et brûlages dirigés cartographiés aux États-Unis en 2013 par le programme MTBS (USFS / USGS).">
+  <title>Incendies USA 2013 (MTBS)</title>
   <link rel="stylesheet" href="https://js.arcgis.com/4.15/esri/css/main.css">
+  <script src='https://js.arcgis.com/4.15'></script>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    #carte {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Title + legend panel (moved into an Expand widget by the script) */
+    #infos {
+      width: 260px;
+      max-width: 80vw;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+
+    #infos h1 {
+      margin: 0 0 6px;
+      font-size: 15px;
+    }
+
+    #infos p {
+      margin: 0 0 8px;
+      line-height: 1.35;
+    }
+
+    /* Legend widget fitted inside the panel: the widget container itself
+       carries esri-widget--panel, whose default width is 300px */
+    #legende {
+      width: auto;
+    }
+
+    #legende .esri-legend__service {
+      padding: 6px 0 0;
+    }
+
+    /* Status banner: loading in progress or data error */
+    #statut {
+      position: absolute;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      max-width: 90%;
+      padding: 8px 14px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      font: 14px "Avenir Next", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    }
+
+    #statut.erreur {
+      background: #b3261e;
+      color: #fff;
+    }
+
+    /* Data source line, rewritten by the script when the fallback service is used */
+    #source {
+      color: #6e6e6e;
+      font-size: 12px;
+    }
+  </style>
 </head>
 
 <body>
+  <div id='carte' role="application" aria-label="Carte des incendies aux États-Unis en 2013"></div>
+  <div id="statut" role="status" aria-live="polite">Chargement des incendies…</div>
+  <div id="infos" class="esri-widget">
+    <h1>Incendies aux États-Unis en 2013</h1>
+    <p>Grands feux cartographiés par le programme <a href="https://www.mtbs.gov/" target="_blank" rel="noopener">MTBS</a> (USFS / USGS) : feux de forêt et brûlages dirigés de plus de 1 000 acres dans l'Ouest et 500 acres dans l'Est. La taille du symbole est proportionnelle à la superficie brûlée. Cliquer sur un feu pour le détail.</p>
+    <div id="legende"></div>
+    <p id="source">Source : export MTBS diffusé via ArcGIS Hub.</p>
+  </div>
+
   <script>
-    require(["esri/Map", "esri/views/MapView", "esri/widgets/Locate", "esri/Graphic", "esri/layers/GeoJSONLayer", "esri/widgets/Search"],
-      function(Map, MapView, Locate, Graphic, GeoJSONLayer, Search) {
-        // Map creation
-        let map1 = new Map({
-          basemap: "satellite",
-          ground: "world-elevation"
+    // Safety net independent of the ArcGIS API: if the CDN never answers, the
+    // require() callback below never runs and the loading banner would stay
+    // forever. Cleared as soon as that callback starts.
+    window.__gardeStatut = setTimeout(function() {
+      const s = document.getElementById("statut");
+      if (s && !s.hidden) {
+        s.className = "erreur";
+        s.textContent = "Impossible de charger l'API ArcGIS. Vérifiez votre connexion.";
+      }
+    }, 20000);
+  </script>
+
+  <script>
+    require(["esri/Map", "esri/views/MapView", "esri/widgets/Locate", "esri/Graphic", "esri/layers/GeoJSONLayer", "esri/layers/FeatureLayer", "esri/widgets/Search", "esri/widgets/Legend", "esri/widgets/Expand", "esri/core/watchUtils"],
+      function(Map, MapView, Locate, Graphic, GeoJSONLayer, FeatureLayer, Search, Legend, Expand, watchUtils) {
+        // The API is there: the CDN safety net is no longer needed
+        clearTimeout(window.__gardeStatut);
+        // Map creation (no ground: elevation is not supported by a 2D MapView)
+        const map1 = new Map({
+          basemap: "satellite"
         })
-        // Template for pop-up on fire locations
+        // Template for pop-up on fire locations (MTBS fields: FIRE_NAME, ACRES, FIRE_TYPE, IG_DATE)
         const template = {
-          title: "Fire name : {FIRE_NAME}",
-          content: "This fire burned {ACRES} acres and his type is {FIRE_TYPE}",
+          title: "Feu : {FIRE_NAME}",
+          content: "Superficie brûlée : {ACRES} acres ({expression/hectares} ha)<br>Type : {expression/type}<br>Date d'ignition : {expression/date}",
+          expressionInfos: [{
+            name: "hectares",
+            expression: "Round($feature.ACRES * 0.4047)"
+          }, {
+            name: "type",
+            expression: "When($feature.FIRE_TYPE == 'Wildfire', 'Feu de forêt', $feature.FIRE_TYPE == 'Prescribed Fire', 'Brûlage dirigé', 'Inconnu')"
+          }, {
+            // IG_DATE is an ISO string in the GeoJSON (dates at 00:00 UTC), a date field in the USFS service
+            name: "date",
+            expression: "Text(ToUTC(Date($feature.IG_DATE)), 'DD/MM/Y')"
+          }],
           fieldInfos: [{
-            fieldName: "time",
+            fieldName: "ACRES",
             format: {
-              dateFormat: "short-date-short-time"
+              digitSeparator: true,
+              places: 0
+            }
+          }, {
+            fieldName: "expression/hectares",
+            format: {
+              digitSeparator: true,
+              places: 0
             }
           }]
         };
-        // Renderer for fire locations
+        // Renderer for fire locations (size driven by visualVariables below:
+        // a "simple" renderer has no field property of its own)
         const renderer = {
           type: "simple",
-          field: "ACRES",
           symbol: {
             type: "simple-marker",
             color: "red",
@@ -41,36 +151,117 @@
           visualVariables: [{
             type: "size",
             field: "ACRES",
+            legendOptions: {
+              title: "Superficie brûlée (acres)"
+            },
+            // Stops follow the real distribution (median 2 000 acres, 86 % of fires below 10 000 acres)
             stops: [{
-                value: 10000,
-                size: "10px"
+                value: 500,
+                size: "5px"
               },
               {
-                value: 100000,
+                value: 2000,
+                size: "9px"
+              },
+              {
+                value: 10000,
+                size: "16px"
+              },
+              {
+                value: 50000,
+                size: "28px"
+              },
+              {
+                value: 250000,
                 size: "40px"
               }
             ]
           }]
         };
-        // Retrieve data from GeoJSON document
+        // Retrieve data from GeoJSON document (Hub export of the USFS MTBS "2013 Fire Occurrence Locations" layer).
+        // Hub download endpoint targeted directly: the legacy opendata.arcgis.com URL only
+        // redirects (301) to this one.
         const geoJSONLayer = new GeoJSONLayer({
-          url: "https://opendata.arcgis.com/datasets/c57777877aa041ecaef98ff2519aabf6_2.geojson",
-          renderer: renderer, //optional
+          url: "https://hub.arcgis.com/api/download/v1/items/c57777877aa041ecaef98ff2519aabf6/geojson?redirect=true&layers=2",
+          title: "Incendies 2013 (MTBS)",
+          // Fields declared explicitly so that unused fields (IRWINID, always null) are skipped.
+          // IG_DATE stays a string: a GeoJSON "date" field only accepts epoch numbers, not ISO strings.
+          fields: [{
+              name: "FIRE_NAME",
+              alias: "Nom",
+              type: "string"
+            },
+            {
+              name: "FIRE_TYPE",
+              alias: "Type",
+              type: "string"
+            },
+            {
+              name: "ACRES",
+              alias: "Superficie (acres)",
+              type: "double"
+            },
+            {
+              name: "IG_DATE",
+              alias: "Date d'ignition",
+              type: "string"
+            }
+          ],
+          renderer: renderer,
           popupTemplate: template
         });
         // Add geoJSONLayer to the map
         map1.add(geoJSONLayer);
-        // Creation of the MapView
-        let mapview = new MapView({
+        // Creation of the MapView. On a narrow screen (Esri xsmall breakpoint = 544 px),
+        // zoom 5 on Denver leaves the whole south-eastern cluster off screen: frame the
+        // entire country instead. Decided before the view exists so there is no re-framing jump.
+        const ecranEtroit = window.innerWidth <= 544;
+        const mapview = new MapView({
           container: "carte",
           map: map1,
-          center: [-104.910886, 39.701752],
-          zoom: 5
+          center: ecranEtroit ? [-98.5, 39.5] : [-104.910886, 39.701752],
+          zoom: ecranEtroit ? 3 : 5
+        });
+        // Status banner (loading / error)
+        const statut = document.getElementById("statut");
+        function afficherStatut(texte, erreur) {
+          statut.textContent = texte;
+          statut.className = erreur ? "erreur" : "";
+          statut.hidden = !texte;
+        }
+        // Resolves once the layer is loaded and drawn, then hides the loading banner
+        function suivreChargement(couche) {
+          return couche.load().then(function() {
+            return mapview.whenLayerView(couche);
+          }).then(function(layerView) {
+            watchUtils.whenFalseOnce(layerView, "updating", function() {
+              afficherStatut("");
+            });
+          });
+        }
+        suivreChargement(geoJSONLayer).catch(function(err) {
+          // Hub export unavailable: fall back to the original USFS service (same data, lowercase field names)
+          afficherStatut("Export Hub indisponible, chargement depuis le service USFS…");
+          document.getElementById("source").textContent =
+            "Source : service USFS EDW (millésime différent de l'export Hub, superficies légèrement différentes).";
+          map1.remove(geoJSONLayer);
+          const feuxUSFS = new FeatureLayer({
+            url: "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_MTBS_01/MapServer/2",
+            title: geoJSONLayer.title,
+            // Only the four fields actually used, spelled as the service exposes them
+            // (lowercase); popup and Arcade resolve field names case-insensitively.
+            outFields: ["fire_name", "fire_type", "acres", "ig_date"],
+            renderer: renderer,
+            popupTemplate: template
+          });
+          map1.add(feuxUSFS);
+          return suivreChargement(feuxUSFS);
+        }).catch(function(err) {
+          afficherStatut("Données incendies indisponibles (" + err.message + ")", true);
         });
         // Locate button
-        var locateWidget = new Locate({
+        const locateWidget = new Locate({
           view: mapview, // Attaches the Locate button to the view
-          //container: "carte"
           graphic: new Graphic({
             symbol: {
               type: "simple-marker",
@@ -80,15 +271,31 @@
           })
         });
         // Search bar
-        var search = new Search({
+        const search = new Search({
           view: mapview
+        });
+        // Title + legend panel, collapsed on small screens so that the map stays visible
+        new Legend({
+          view: mapview,
+          container: "legende"
+        });
+        const infos = new Expand({
+          view: mapview,
+          content: document.getElementById("infos"),
+          expandIconClass: "esri-icon-description",
+          expandTooltip: "Titre et légende",
+          expanded: true
         });
         mapview.ui.add(locateWidget, "bottom-right");
         mapview.ui.add(search, "top-right");
+        mapview.ui.add(infos, "top-left");
+        mapview.when(function() {
+          if (mapview.widthBreakpoint === "xsmall") {
+            infos.expanded = false;
+          }
+        });
       })
   </script>
-
-  <div id='carte' style='width:100%;height:850px'></div>
 </body>
 
 </html>
