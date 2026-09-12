@@ -1,7 +1,6 @@
 html,
 body,
-#viewDiv,
-#container {
+#viewDiv {
   padding: 0;
   margin: 0;
   height: 100%;
@@ -16,6 +15,148 @@ body {
 
 #viewDiv canvas {
   filter: saturate(1.2) drop-shadow(0 0 20px white);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+
+/* panneau : titre + liste des lieux */
+
+#panel {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  z-index: 1;
+  max-width: 260px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+#panel h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.panel-hint {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+}
+
+.panel-toggle {
+  display: none;
+}
+
+#pointList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.point-button {
+  display: block;
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: #0269a1;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.point-button:hover,
+.point-button:focus {
+  text-decoration: underline;
+}
+
+.panel-reset {
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: #0269a1;
+  font: inherit;
+  font-size: 0.9em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.panel-reset:hover,
+.panel-reset:focus {
+  text-decoration: underline;
+}
+
+
+/* indicateur de chargement et messages d'erreur */
+
+#loading,
+#error {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  max-width: calc(100% - 30px);
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  font-size: 0.95em;
+}
+
+#loading {
+  pointer-events: none;
+}
+
+#error {
+  border-left: 4px solid #c0392b;
+}
+
+
+/* petits écrans : panneau compact, liste repliable */
+
+@media (max-width: 544px) {
+  #panel {
+    max-width: calc(100% - 30px);
+    padding: 8px 12px;
+  }
+
+  #panel h1 {
+    margin-bottom: 4px;
+    font-size: 16px;
+  }
+
+  .panel-hint {
+    display: none;
+  }
+
+  .panel-toggle {
+    display: inline-block;
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    color: #0269a1;
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  #pointList,
+  .panel-reset {
+    display: none;
+  }
+
+  #panel.is-open #pointList {
+    display: block;
+    margin-top: 4px;
+  }
+
+  #panel.is-open .panel-reset {
+    display: inline-block;
+  }
 }
 
 

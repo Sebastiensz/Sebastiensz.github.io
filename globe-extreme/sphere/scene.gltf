@@ -1,0 +1,110 @@
+{
+  "asset": {
+    "version": "2.0",
+    "generator": "make_sphere_gltf.py (sphere UV 48x96)"
+  },
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "ocean",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "name": "oceanSphere",
+      "mesh": 0
+    }
+  ],
+  "meshes": [
+    {
+      "name": "sphere",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0,
+            "NORMAL": 1
+          },
+          "indices": 2,
+          "material": 0,
+          "mode": 4
+        }
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "name": "ocean",
+      "doubleSided": false,
+      "alphaMode": "BLEND",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0,
+          1,
+          1,
+          0.8
+        ],
+        "metallicFactor": 1,
+        "roughnessFactor": 0.7
+      }
+    }
+  ],
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 4753,
+      "type": "VEC3",
+      "min": [
+        -10.0,
+        0.0,
+        -10.0
+      ],
+      "max": [
+        10.0,
+        20.0,
+        10.0
+      ]
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5126,
+      "count": 4753,
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5123,
+      "count": 27648,
+      "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteOffset": 0,
+      "byteLength": 57036,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 57036,
+      "byteLength": 57036,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteOffset": 114072,
+      "byteLength": 55296,
+      "target": 34963
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 169368,
+      "uri": "scene.bin"
+    }
+  ]
+}

@@ -1,84 +1,94 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1" />
-  <title>The globe of extremes</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Globe 3D interactif : relief exagéré (topographie x40, bathymétrie x60), surface océanique en modèle glTF et huit lieux extrêmes de la Terre. ArcGIS Maps SDK for JavaScript." />
+  <title>Le globe des extrêmes</title>
+  <!-- pas d'icône de site dans le portfolio : évite une requête /favicon.ico en 404 -->
+  <link rel="icon" href="data:," />
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.12/esri/themes/light/main.css" />
   <link rel="stylesheet" href="./style.css" />
-  
+
   <script>
-    const locationPath = location.pathname.replace(/\/[^\/]+$/, "");
-    dojoConfig = {
+    // Package Dojo « utils » = dossier ./utils de l'application, que la page soit
+    // appelée via /globe-extreme/ ou /globe-extreme/index.html
+    var locationPath = location.pathname.replace(/\/[^\/]*$/, "");
+    var dojoConfig = {
       packages: [{
         name: "utils",
-        location: locationPath + "utils"
+        location: locationPath + "/utils"
       }],
       async: true
     };
-	</script>
-  
+  </script>
+
   <script src="https://js.arcgis.com/4.12/"></script>
-  
+
   <script>
     require([
       "esri/Map",
       "esri/views/SceneView",
       "esri/layers/TileLayer",
       "esri/Basemap",
-      "utils/ExaggeratedElevationLayer.js",
-	  "esri/Graphic",
+      "esri/Graphic",
       "esri/geometry/Point",
-      "esri/geometry/Mesh",
-	  "esri/layers/GeoJSONLayer",
-	  "esri/layers/FeatureLayer"
-     ], function (Map, SceneView, TileLayer, Basemap, ExaggeratedElevationLayer, Graphic, Point, Mesh, GeoJSONLayer, FeatureLayer) {
-      const R = 6358137; // approximate radius of the Earth in m
-	  const offset = 300000; // offset from the ground used for the clouds
-      const basemap = new Basemap({
-        baseLayers: [
-          new TileLayer({
-            url: "https://tiles.arcgis.com/tiles/nGt4QxSblgDfeJn9/arcgis/rest/services/terrain_with_heavy_bathymetry/MapServer"
-          })
-        ]
+      "esri/layers/GeoJSONLayer",
+      "esri/widgets/Zoom",
+      "esri/core/watchUtils",
+      "utils/ExaggeratedElevationLayer",
+      "dojo/domReady!" // le script est dans <head> : attendre que le <body> soit analysé
+    ], function (Map, SceneView, TileLayer, Basemap, Graphic, Point, GeoJSONLayer, Zoom, watchUtils, ExaggeratedElevationLayer) {
+      const R_EARTH = 6378137; // rayon terrestre (m) utilisé par la SceneView
+      const R = R_EARTH - 20000; // rayon de la sphère « océan » : un peu sous le niveau de la mer pour passer sous les côtes
+      const offset = 300000; // altitude (m) des symboles des lieux
+      const smallScreen = window.matchMedia("(max-width: 544px)"); // seuil « xsmall » de l'API, suivi en continu
+      const CAMERA_INITIALE = {
+        position: [-64.128288, 21.827774, 19921223.30821], // au-dessus de l'Atlantique, au large des Antilles
+        heading: 2.03,
+        tilt: 0.13
+      };
+
+      // ---- Indicateur de chargement et messages d'erreur visibles à l'écran
+      const loadingEl = document.getElementById("loading");
+      const errorEl = document.getElementById("error");
+      const errorMessages = [];
+
+      function hideLoading() {
+        loadingEl.hidden = true;
+      }
+
+      function showError(message, error) {
+        console.error(message, error);
+        hideLoading();
+        if (errorMessages.indexOf(message) === -1) {
+          errorMessages.push(message);
+          errorEl.textContent = errorMessages.join(" ");
+          errorEl.hidden = false;
+        }
+      }
+
+      // ---- Fond de carte (service tuilé d'une organisation tierce), repli sur le fond satellite Esri
+      const terrainLayer = new TileLayer({
+        url: "https://tiles.arcgis.com/tiles/nGt4QxSblgDfeJn9/arcgis/rest/services/terrain_with_heavy_bathymetry/MapServer",
+        title: "Terrain with heavy bathymetry"
       });
       const map = new Map({
-        basemap: basemap
+        basemap: new Basemap({ baseLayers: [terrainLayer] })
       });
-	  
-	  /*const layer1 = new FeatureLayer({ //couche courant marins
-	  url:"https://services.arcgis.com/6DIQcwlPy8knb6sg/arcgis/rest/services/ConveyorBelt_WFL1/FeatureServer/0",
-	  });
-	 // map.add(layer1); //ajouter courant marins
-	  	  const layer2 = new FeatureLayer({ //couche courant marins
-	  url:"https://services.arcgis.com/6DIQcwlPy8knb6sg/arcgis/rest/services/ConveyorBelt_WFL1/FeatureServer/1",
-	  });
-	  map.add(layer2); //ajouter courant marins
-	  
-	  const layer3 = new FeatureLayer({ //couche courant marins
-	  url:"https://services.arcgis.com/6DIQcwlPy8knb6sg/arcgis/rest/services/XYZV_Coordinates/FeatureServer/0",
-	  });
-	  //map.add(layer3); //ajouter courant marins
-	  
-	  const layer4 = new FeatureLayer({ //couche courant marins
-	  url:"http://services1.arcgis.com/VAI453sU9tG9rSmh/arcgis/rest/services/WorldGeo_Physical_Climate_features/FeatureServer/8",
-	  });
-	  //map.add(layer4); //ajouter courant marins
-	  */
-	  
+      terrainLayer.when(null, function (error) {
+        map.basemap = "satellite";
+        showError("Le fond de carte « terrain with heavy bathymetry » est indisponible : fond satellite Esri affiché à la place.", error);
+      });
+
       const view = new SceneView({
         container: "viewDiv",
         map: map,
         alphaCompositingEnabled: true,
-        qualityProfile: "high",
-        camera: {
-          //position: [-55.03975781, 14.94826384, 19921223.30821],
-		  position: [-64.128288, 21.827774, 19921223.30821], //mettre sur le groenland
-          heading: 2.03,
-          tilt: 0.13
-        },
+        qualityProfile: smallScreen.matches ? "medium" : "high",
+        camera: CAMERA_INITIALE,
         environment: {
           background: {
             type: "color",
@@ -87,86 +97,194 @@
           starsEnabled: false,
           atmosphereEnabled: false,
           lighting: {
-            directShadowsEnabled: false,
-            //date: "Sun Jun 23 2019 19:19:18 GMT+0200 (Central European Summer Time)"
+            directShadowsEnabled: false
           }
         },
         constraints: {
           altitude: {
-            //min: 10000000,
-            //max: 25000000
+            min: 4000000, // en dessous, le relief x40 n'a plus de sens
+            max: 25000000
           }
-		   },
+        },
         popup: {
           dockEnabled: true,
           dockOptions: {
-            position: "top-right",
+            // petit écran : popup pleine largeur en bas (repliable), sinon en haut à droite
+            position: smallScreen.matches ? "bottom-center" : "top-right",
             breakpoint: false,
             buttonEnabled: false
           },
-          collapseEnabled: false
+          collapseEnabled: smallScreen.matches
         },
         highlightOptions: {
           color: [255, 255, 255],
           haloOpacity: 0.5
-		          }
-		
+        }
       });
-	  view.ui.empty("top-left");
-			
-		map.ground.layers = [new ExaggeratedElevationLayer({
+      view.ui.empty("top-left"); // le panneau des lieux occupe déjà ce coin
+      if (!smallScreen.matches) {
+        // affordance de navigation visible sur grand écran (le coin haut gauche est vidé),
+        // en bas à droite pour ne pas croiser le popup ancré en haut à droite.
+        // Sur mobile, le popup est ancré en bas et recouvrirait le widget : le pincement suffit.
+        view.ui.add(new Zoom({ view: view }), "bottom-right");
+      }
+
+      // le seuil « xsmall » peut être franchi après coup (rotation du téléphone, redimensionnement)
+      function applySmallScreenPopup(matches) {
+        view.popup.dockOptions = {
+          position: matches ? "bottom-center" : "top-right",
+          breakpoint: false,
+          buttonEnabled: false
+        };
+        view.popup.collapseEnabled = matches;
+      }
+      if (smallScreen.addEventListener) {
+        smallScreen.addEventListener("change", function (event) {
+          applySmallScreenPopup(event.matches);
+        });
+      } else if (smallScreen.addListener) {
+        smallScreen.addListener(function (event) { // navigateurs anciens
+          applySmallScreenPopup(event.matches);
+        });
+      }
+
+      view.when(function () {
+        // la surface 3D est focusable et porte role="application" : lui donner un nom accessible
+        const surfaceEl = view.surface || document.querySelector("#viewDiv .esri-view-surface");
+        if (surfaceEl) {
+          surfaceEl.setAttribute("aria-label", "Globe 3D interactif : relief exagéré ×40 et fonds marins ×60. Utilisez les flèches du clavier pour faire tourner le globe, ou la liste des lieux en haut à gauche.");
+        }
+        // globe prêt : l'indicateur disparaît dès que les premières tuiles sont affichées
+        watchUtils.whenFalseOnce(view, "updating", hideLoading);
+      }, function (error) {
+        const webgl = /webgl/i.test(String(error && (error.name + " " + error.message)));
+        showError(webgl
+          ? "Ce navigateur ne permet pas le rendu 3D (WebGL indisponible ou désactivé) : le globe ne peut pas s'afficher."
+          : "Le globe 3D n'a pas pu être initialisé.", error);
+      });
+      view.on("layerview-create-error", function (event) {
+        // les couches du sol (relief exagéré) ont déjà leur propre message dédié : pas de doublon
+        if (event.layer && map.ground.layers.includes(event.layer)) {
+          return;
+        }
+        const titre = (event.layer && event.layer.title) || "sans titre";
+        showError("La couche « " + titre + " » n'a pas pu être affichée.", event.error);
+      });
+      setTimeout(hideLoading, 30000); // sécurité : l'indicateur ne reste jamais affiché indéfiniment
+
+      // ---- Relief exagéré (topographie x40, bathymétrie x60)
+      const elevationLayer = new ExaggeratedElevationLayer({
+        title: "Relief exagéré",
         exaggerationBathymetry: 60,
         exaggerationTopography: 40
-      })];
-	  
-      const origin = new Point({
-        x: 0, y: -90, z: -(2 * R)
       });
+      map.ground.layers = [elevationLayer];
+      elevationLayer.when(null, function (error) {
+        showError("Le service d'élévation TopoBathy3D est indisponible : le relief exagéré ne peut pas être affiché.", error);
+      });
+
+      // ---- Surface océanique : modèle glTF local (sphère semi-transparente) centré sur la Terre.
+      // L'origine du modèle est à la base de la sphère : placée au pôle Sud à -(R_EARTH + R),
+      // elle ressort au pôle Nord et la sphère de diamètre 2R englobe exactement le globe.
       const oceanSurface = new Graphic({
-        geometry: origin,
+        geometry: new Point({ x: 0, y: -90, z: -(R_EARTH + R) }),
         symbol: {
           type: "point-3d",
-          symbolLayers: [
-            {
-              type: "object",
-              resource: {
-                //href: "./sphere/scene.gltf"
-				href: "https://raw.githubusercontent.com/RalucaNicola/the-globe-of-extremes/c120fec479029ba880088649a2d6738dfe52e4f2/sphere/scene.gltf"
-              },
-              width: 2 * R
+          symbolLayers: [{
+            type: "object",
+            resource: { href: "./sphere/scene.gltf" },
+            width: 2 * R
+          }]
+        }
+      });
+      // Un Graphic n'expose aucune promesse de chargement : on vérifie l'asset avant de l'ajouter,
+      // sinon la sphère disparaîtrait silencieusement du globe.
+      fetch("./sphere/scene.gltf").then(function (response) {
+        if (!response.ok) {
+          throw new Error("HTTP " + response.status);
+        }
+        view.graphics.add(oceanSurface);
+      }).catch(function (error) {
+        showError("La surface océanique (modèle glTF) n'a pas pu être chargée : le globe est affiché sans elle.", error);
+      });
+
+      // ---- Contenu du popup construit en DOM plutôt qu'en chaîne HTML : cela permet de
+      // retirer le bloc image quand l'image externe (Wikimedia, blog) ne se charge pas,
+      // au lieu d'afficher l'icône d'image cassée du navigateur au-dessus de la légende.
+      function lienExterne(url, texte) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = texte || url;
+        return a;
+      }
+
+      function contenuPopup(feature) {
+        const attributs = (feature && (feature.graphic ? feature.graphic.attributes : feature.attributes)) || {};
+        const racine = document.createElement("div");
+        racine.lang = "en"; // les données des lieux sont en anglais
+
+        if (attributs.imageUrl) {
+          const blocImage = document.createElement("div");
+          blocImage.className = "popupImage";
+          const image = document.createElement("img");
+          image.src = attributs.imageUrl;
+          image.alt = attributs.imageCaption || "";
+          image.addEventListener("error", function () {
+            if (blocImage.parentNode) {
+              blocImage.parentNode.removeChild(blocImage); // la légende ci-dessous suffit
             }
-          ]
+          });
+          blocImage.appendChild(image);
+          racine.appendChild(blocImage);
+
+          const legende = document.createElement("div");
+          legende.className = "popupImageCaption";
+          legende.textContent = attributs.imageCaption || "";
+          racine.appendChild(legende);
         }
-      });
-      //view.graphics.add(oceanSurface);
-	  
-	       const cloudsSphere = Mesh.createSphere(new Point({
-        x: 0, y: -90, z: -(2 * R + offset)
-      }), {
-        size: 2 * (R + offset),
-        material: {
-          colorTexture: "https://raw.githubusercontent.com/RalucaNicola/the-globe-of-extremes/047b19153b5bd1c2c4ff672ff88a54d8adc91d6b/clouds-nasa.png",
-          doubleSided: false
-        },
-        densificationFactor: 4
-      });
-      cloudsSphere.components[0].shading = "flat";
-      const clouds = new Graphic({
-        geometry: cloudsSphere,
-        symbol: {
-          type: "mesh-3d",
-          symbolLayers: [{ type: "fill" }]
-        }
-      });
-      //view.graphics.add(clouds);
-	  
-	 const extremesLayer = new GeoJSONLayer({
-        //url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
-		url:"https://raw.githubusercontent.com/RalucaNicola/the-globe-of-extremes/97773d44eb1a1ee0adfbfddbb710b144a515950b/extreme-points.geojson",
+
+        const description = document.createElement("div");
+        description.className = "popupDescription";
+        [
+          ["esri-icon-favorites", attributs.type],
+          ["esri-icon-map-pin", attributs.location],
+          ["esri-icon-documentation", attributs.facts]
+        ].forEach(function (ligne) {
+          if (!ligne[1]) {
+            return;
+          }
+          const paragraphe = document.createElement("p");
+          paragraphe.className = "info";
+          // les données peuvent contenir du HTML (emphase, lien vers l'étude source) : rendu inchangé
+          paragraphe.innerHTML = '<span class="' + ligne[0] + '" aria-hidden="true"></span> ' + ligne[1];
+          description.appendChild(paragraphe);
+        });
+        racine.appendChild(description);
+
+        const credits = document.createElement("div");
+        credits.className = "popupCredits";
+        credits.appendChild(document.createTextNode("Sources: "));
+        credits.appendChild(lienExterne(attributs.sourceUrl, attributs.source));
+        credits.appendChild(document.createTextNode(" released under "));
+        credits.appendChild(lienExterne(attributs.sourceCopyrightUrl, attributs.sourceCopyright));
+        credits.appendChild(document.createTextNode(", "));
+        credits.appendChild(lienExterne(attributs.imageCopyrightUrl, attributs.imageCopyright));
+        credits.appendChild(document.createTextNode("."));
+        racine.appendChild(credits);
+
+        return racine;
+      }
+
+      // ---- Les huit lieux extrêmes (copie locale du GeoJSON)
+      const extremesLayer = new GeoJSONLayer({
+        url: "./extreme-points.geojson",
+        title: "Extreme points",
         elevationInfo: {
           mode: "absolute-height",
           offset: offset
-        },	
+        },
         renderer: {
           type: "simple",
           symbol: {
@@ -184,40 +302,92 @@
               outline: { color: [245, 99, 66, 1], size: 2 },
               size: 30
             }]
-          } //fin symbol
-        }, // fin renderer
+          }
+        },
         popupTemplate: {
           title: "{name}",
-          content: `
-            <div class="popupImage">
-              <img src="{imageUrl}" alt="{imageCaption}"/>
-            </div>
-            <div class="popupImageCaption">{imageCaption}</div>
-            <div class="popupDescription">
-              <p class="info">
-                <span class="esri-icon-favorites"></span> {type}
-              </p>
-              <p class="info">
-                <span class="esri-icon-map-pin"></span> {location}
-              </p>
-              <p class="info">
-                <span class="esri-icon-documentation"></span> {facts}
-              </p>
-            </div>
-            <div class="popupCredits">
-              Sources: <a href="{sourceUrl}" target="_blank">{source}</a> released under <a href="{sourceCopyrightUrl}">{sourceCopyright}</a>, <a href="{imageCopyrightUrl}" target="_blank">{imageCopyright}</a>.
-            </div>
-          `
+          content: contenuPopup
         }
-      }); //fin geojson
+      });
       map.layers.add(extremesLayer);
 
+      // ---- Liste des lieux : accès direct sans avoir à faire tourner le globe
+      const panelEl = document.getElementById("panel");
+      const toggleEl = document.getElementById("panelToggle");
+      const listEl = document.getElementById("pointList");
+      const resetEl = document.getElementById("resetView");
+
+      function setListOpen(open) {
+        panelEl.classList.toggle("is-open", open);
+        toggleEl.setAttribute("aria-expanded", String(open));
+      }
+
+      toggleEl.addEventListener("click", function () {
+        setListOpen(!panelEl.classList.contains("is-open"));
+      });
+
+      // retour à la vue de départ : seul repère pour se rattraper après avoir fait tourner le globe
+      resetEl.addEventListener("click", function () {
+        if (smallScreen.matches) {
+          setListOpen(false);
+        }
+        view.popup.close();
+        view.goTo(CAMERA_INITIALE).then(null, function () {
+          // animation interrompue par l'utilisateur : rien à faire
+        });
+      });
+
+      function goToFeature(feature) {
+        if (smallScreen.matches) {
+          setListOpen(false);
+        }
+        view.goTo({
+          position: [feature.geometry.longitude, feature.geometry.latitude, view.camera.position.z],
+          heading: 0,
+          tilt: 0
+        }).then(function () {
+          view.popup.open({ features: [feature] });
+        }, function () {
+          // animation interrompue par l'utilisateur : rien à faire
+        });
+      }
+
+      extremesLayer.when(function () {
+        return extremesLayer.queryFeatures();
+      }).then(function (result) {
+        result.features.forEach(function (feature) {
+          feature.popupTemplate = extremesLayer.popupTemplate;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "point-button";
+          button.textContent = feature.attributes.name;
+          button.addEventListener("click", function () {
+            goToFeature(feature);
+          });
+          const item = document.createElement("li");
+          item.appendChild(button);
+          listEl.appendChild(item);
+        });
+      }, function (error) {
+        showError("Les lieux extrêmes (extreme-points.geojson) n'ont pas pu être chargés.", error);
+      });
     });
   </script>
 </head>
 
 <body>
   <div id="viewDiv"></div>
+  <div id="panel">
+    <h1>Le globe des extrêmes</h1>
+    <p class="panel-hint">Relief exagéré ×40, fonds marins ×60. Faites tourner le globe ou cliquez sur un lieu :</p>
+    <button type="button" id="panelToggle" class="panel-toggle" aria-expanded="false" aria-controls="pointList">Choisir un lieu</button>
+    <nav aria-label="Lieux extrêmes">
+      <ul id="pointList"></ul>
+    </nav>
+    <button type="button" id="resetView" class="panel-reset">Revenir à la vue initiale</button>
+  </div>
+  <div id="loading" role="status">Chargement du globe…</div>
+  <div id="error" role="alert" hidden></div>
 </body>
 
 </html>
