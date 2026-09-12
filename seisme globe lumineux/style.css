@@ -24,6 +24,28 @@ body {
   left: 10px;
 }
 
+/* message de chargement / d'erreur, au centre du globe */
+#status {
+  position: absolute;
+  top: 45%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  text-align: center;
+  padding: 0.6em 1em;
+  font-size: 0.95em;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 243, 131, 0.5);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+#status.error {
+  border-color: rgb(255, 99, 71);
+  color: rgb(255, 200, 190);
+}
+
 #details {
   position: absolute;
   bottom: 0;
@@ -33,6 +55,10 @@ body {
   line-height: 1.5em;
   padding: 1em;
   background-color: rgba(0, 0, 0, 0.6);
+}
+
+#details p {
+  margin: 0.5em 0;
 }
 
 #details button {
@@ -51,6 +77,36 @@ body {
   background-color: white;
 }
 
+#year-control label {
+  margin-right: 0.5em;
+}
+
+#year-select {
+  font-family: inherit;
+  font-size: 1em;
+  color: white;
+  background-color: rgba(0, 0, 0, 0.6);
+  border: 1px solid white;
+  border-radius: 2px;
+  padding: 0.1em 0.3em;
+  cursor: pointer;
+}
+
+#year-select option {
+  color: black;
+  background-color: white;
+}
+
+#year-select:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.credits {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.85em;
+}
+
 .big-circle,
 .small-circle {
   display: inline-block;
@@ -61,7 +117,7 @@ body {
 .small-circle {
   width: 5px;
   height: 5px;
-  background-color: rgb(254, 240, 217);
+  background-color: rgb(255, 99, 71);
 }
 
 .big-circle {
@@ -75,7 +131,7 @@ body {
   display: inline-block;
   width: 50px;
   height: 5px;
-  background-color: rgba(255, 133, 125, 0.7);
+  background-color: rgba(255, 99, 71, 0.7);
 }
 
 ul {
@@ -91,6 +147,28 @@ a {
 #earthquake-list {
   overflow: auto;
   white-space: nowrap;
+  /* barre de défilement toujours visible : sinon rien n'indique que la liste défile */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.5) rgba(255, 255, 255, 0.15);
+}
+
+#earthquake-list::-webkit-scrollbar {
+  height: 8px;
+}
+
+#earthquake-list::-webkit-scrollbar-track {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+#earthquake-list::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+}
+
+#earthquake-list:focus {
+  outline: 1px solid rgba(255, 243, 131, 0.8);
+  outline-offset: 2px;
 }
 
 #earthquake-list > div {
@@ -108,4 +186,19 @@ a {
 
 #earthquake-list h3 {
   margin: 0.1em;
+}
+
+/* petits écrans ET écrans courts (téléphone en paysage, 844x390) :
+   le panneau ne doit pas recouvrir le globe */
+@media (max-width: 768px), (max-height: 500px) {
+  .title {
+    font-size: 1.1rem;
+    margin: 0.4em 0;
+  }
+
+  #details {
+    max-height: 42vh;
+    overflow-y: auto;
+    font-size: 0.85em;
+  }
 }

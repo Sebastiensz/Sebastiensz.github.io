@@ -1,43 +1,80 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
   <head>
-    <title>Séismes en  2019</title>
     <meta charset="utf-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>Séismes majeurs dans le monde</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Globe 3D lumineux des séismes de magnitude 4 et plus enregistrés par l'USGS, année par année de 2010 à 2021."
+    />
     <link rel="stylesheet" href="https://js.arcgis.com/4.14/esri/themes/light/main.css" />
     <script src="https://js.arcgis.com/4.14/"></script>
     <link rel="stylesheet" href="./style.css" />
     <script src="./main.js" defer></script>
+    <script>
+      // si le CDN Esri est injoignable, main.js ne démarre pas : on le dit à l'écran
+      window.addEventListener("DOMContentLoaded", function() {
+        if (typeof require === "undefined") {
+          var statut = document.getElementById("status");
+          statut.textContent = "L'API ArcGIS d'Esri n'a pas pu être chargée : vérifiez votre connexion.";
+          statut.className = "error";
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="view-container"></div>
-    <h1 class="title">Les séismes majeures en 2019</h1>
+    <h1 class="title" id="page-title">Les séismes majeurs</h1>
+    <div id="status" role="status" aria-live="polite">Chargement des données sismiques…</div>
     <div id="details">
-      <div id="legend">
-        En 2019, il y a eu 13456 tremblements de terre de magnitude supérieure ou égale à 4. Dans cette visualisation, les petites sphères oranges (
-        <div class="small-circle"></div>
-        ) sont les séismes avec une magnitude de 4 à 6. Les grandes sphères rouges sont (
-        <div class="big-circle"></div>
-        ) les séismes avec une magnitude supérieure à 7. Entre les deux, la couleur et la taille des sphères sont interpolées.
-       La profondeur du séisme est exagérée par un facteur de 6. Les lignes oranges (
-        <div class="orange-line"></div>
-        ) représente les délimitations des plaques tectoniques. Données sismiques de
-        <a href="https://earthquake.usgs.gov/earthquakes/search/">USGS</a>.
-        <a href="https://www.arcgis.com/home/item.html?id=2b93b06dc0dc4e809d3c8db5cb96ba69"
-          >Le service d'entités des frontières des pays</a
-        >
-        est mis à disposition par le <a href="https://livingatlas.arcgis.com/en/">Living Atlas</a>. Visualisation créée avec  <a href="https://developers.arcgis.com/javascript">l'ArcGIS API JavaScript d'Esri</a>.
-      </div>
-      <button id="legend-control">Cacher l'explication</button>
-      <p>
-        <button id="toggle-exaggeration">
-          Cocher l'exagération
-        </button>
-        pour visualiser la profondeur réelle ou la profondeur exagérée. TLa liste ci-dessous affiche les tremblements de terre avec magnitude
-         supérieur à 7 dans l'ordre chronologique.
+      <p id="year-control">
+        <label for="year-select">Année observée :</label>
+        <select id="year-select" aria-describedby="legend-intro"></select>
       </p>
-      <div id="earthquake-list"></div>
+      <!-- le fait chiffré reste hors du bloc masquable : il doit rester lisible
+           explication repliée, ce qui est le cas par défaut sur petit écran -->
+      <p id="legend-intro">Chargement des données sismiques…</p>
+      <div id="legend">
+        <p>
+          Dans cette visualisation, les petites sphères orange (<span class="small-circle"></span>) sont les séismes
+          de magnitude 4 à 5,5. Les grandes sphères rouge sombre (<span class="big-circle"></span>) sont les séismes
+          de magnitude 7 et plus. Entre les deux, la couleur et la taille des sphères sont interpolées.
+          La profondeur du séisme est exagérée par un facteur de 6. Les lignes orange
+          (<span class="orange-line"></span>) représentent les délimitations des plaques tectoniques.
+        </p>
+        <p>
+          Données sismiques de
+          <a href="https://earthquake.usgs.gov/earthquakes/search/" target="_blank" rel="noopener noreferrer">USGS</a>.
+          <a
+            href="https://www.arcgis.com/home/item.html?id=2b93b06dc0dc4e809d3c8db5cb96ba69"
+            target="_blank"
+            rel="noopener noreferrer"
+            >Le service d'entités des frontières des pays</a
+          >
+          est mis à disposition par le
+          <a href="https://livingatlas.arcgis.com/en/" target="_blank" rel="noopener noreferrer">Living Atlas</a>.
+          Visualisation créée avec
+          <a href="https://developers.arcgis.com/javascript" target="_blank" rel="noopener noreferrer"
+            >l'ArcGIS API JavaScript d'Esri</a
+          >.
+        </p>
+      </div>
+      <button id="legend-control" aria-expanded="true" aria-controls="legend">Cacher l'explication</button>
+      <p>
+        <button id="toggle-exaggeration" aria-pressed="true">
+          Afficher la profondeur réelle
+        </button>
+        pour basculer entre la profondeur réelle et la profondeur exagérée. La liste ci-dessous affiche les
+        tremblements de terre de magnitude supérieure à 7, dans l'ordre chronologique.
+      </p>
+      <p class="credits">Données USGS · fonds de carte Esri Living Atlas</p>
+      <div
+        id="earthquake-list"
+        tabindex="0"
+        role="region"
+        aria-label="Séismes de magnitude supérieure à 7"
+      ></div>
     </div>
   </body>
 </html>
