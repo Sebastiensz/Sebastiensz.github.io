@@ -2,231 +2,494 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
-    <title>Evergreen boat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Comparez la taille réelle du porte-conteneurs Ever Given (400 m) à la largeur du canal de Suez, sur le site de l'échouement de mars 2021."
+    />
+    <title>Ever Given - Canal de Suez 2021</title>
+
+    <!-- Ouverture anticipée des connexions vers le CDN ArcGIS et le service de fond de plan -->
+    <link rel="preconnect" href="https://js.arcgis.com" crossorigin />
+    <link rel="preconnect" href="https://basemaps.arcgis.com" crossorigin />
 
     <style>
+      html, body {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: "Helvetica Neue", helvetica, arial, sans-serif;
+      }
 
-	  
-	  body {
-  font-family: "Epilogue", "Helvetica Neue", helvetica, arial, sans-serif;
-  margin: 2em;
-  height: 100%;
-  padding: 0
-}
+      /* En-tête + barre de boutons en haut, la carte occupe le reste de la hauteur */
+      body {
+        display: flex;
+        flex-direction: column;
+      }
 
-#info {
-  padding: 0 1em;
-}
+      header {
+        padding: 0.5em 0.7em 0;
+      }
 
-#controls {
-  padding: 1em;
-}
+      h1 {
+        margin: 0;
+        font-size: 1.2em;
+        color: #3333cc;
+      }
 
+      #intro {
+        margin: 0.2em 0 0;
+        font-size: 0.9em;
+        color: #555;
+      }
 
-h1 {
-  color: #373fff;
-}
+      /* Provenance de l'image du navire, rendue visible plutôt que laissée en commentaire */
+      #credit {
+        margin: 0.2em 0 0;
+        font-size: 0.75em;
+        color: #555;
+      }
 
-.h1-1 {
-  text-shadow: 2px 2px 0px coral;
-}
+      #credit a {
+        color: #3333cc;
+      }
 
-.h1-2 {
-  text-shadow: 2px 2px 0px greenyellow;
-}
+      #controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.3em;
+        padding: 0.4em 0.7em;
+      }
 
-#info-hider {
-  margin-left: 2.5em;
-}
+      /* Lecture de l'état courant (cap, taille rendue, échelle) */
+      #readout {
+        margin: 0 0 0 0.3em;
+        font-size: 0.8em;
+        color: #555;
+      }
 
-button {
-  padding: 0;
-  border: none;
-  font: inherit;
-  color: inherit;
-  background-color: transparent;
-  cursor: pointer;
-  font-size: 1.1em;
-  display: inline-block;
-  text-align: center;
-  text-decoration: none;
-  margin: 2px 0;
-  border: solid 1px transparent;
-  border-radius: 4px;
-  padding: 0.3em 0.7em;
-  font-weight: bold;
-  color: #ffffff;
-  background-color: #3333cc;
-}
+      button {
+        font: inherit;
+        font-size: 1.1em;
+        font-weight: bold;
+        cursor: pointer;
+        display: inline-block;
+        text-align: center;
+        text-decoration: none;
+        margin: 0;
+        padding: 0.3em 0.7em;
+        border: solid 1px transparent;
+        border-radius: 4px;
+        color: #ffffff;
+        background-color: #3333cc;
+      }
 
-button.small {
-  font-size: 0.9em;
-}
+      button.notactive {
+        border: solid 1px #3333cc;
+        background-color: #ddd;
+        color: #333;
+      }
 
-button.notactive {
-  border: solid 1px #3333cc;
-  background-color: #ddd;
-  color: #333;
-}
+      @media (max-width: 480px) {
+        button {
+          font-size: 0.9em;
+          padding: 0.25em 0.5em;
+        }
+      }
 
-html, body {
-  height: 100%;
-  width: 100vw;
-  margin: 0;
-}
+      /* Conteneur carte + navire : position:relative pour que l'image, centrée en
+         absolu, coïncide avec view.center ; overflow:hidden évite le débordement
+         horizontal de l'image (400 px) sur mobile */
+      #container {
+        flex: 1 1 auto;
+        min-height: 300px;
+        position: relative;
+        overflow: hidden;
+      }
 
-#container {
-  height: 900px;
-  width: 100%;
-  position: relative;
-}
+      #viewDiv {
+        height: 100%;
+        width: 100%;
+      }
 
-@media (max-height: 1200px) {
-  #container {
-    height: 500px;
-  }
-}
+      /* 400 px de référence, mais jamais plus de 94 % du conteneur : sur mobile
+         la proue et la poupe restaient rognées par overflow:hidden. La largeur
+         réellement rendue est relue en JS pour garder l'échelle exacte. */
+      #evergiven {
+        pointer-events: none;
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        height: auto;
+        width: min(400px, 94%);
+        z-index: 1000;
+        transform: translate(-50%,-50%);
+        -webkit-filter: drop-shadow(5px 5px 5px #222);
+        filter: drop-shadow(5px 5px 5px #222);
+      }
 
-#viewdiv{
-  height: 100%;
-  width:100%;
-}
+      #loader {
+        position: absolute;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1100;
+        pointer-events: none;
+        background-color: rgba(255, 255, 255, 0.7);
+        color: #333;
+        font-weight: bold;
+      }
 
-#evergiven {
-  pointer-events: none;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  height: auto;
-  width: 400px;
-  z-index: 1000;
-  transform: translate(-50%,-50%);  
-  -webkit-filter: drop-shadow(5px 5px 5px #222);
-  filter: drop-shadow(5px 5px 5px #222);
-}
+      #loader[hidden] {
+        display: none;
+      }
 
-p.small {
-  font-size: 0.8em;
-  color: #555;
-}
+      #message,
+      #noscript-message {
+        position: absolute;
+        top: 0.5em;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 90%;
+        margin: 0;
+        padding: 0.5em 1em;
+        z-index: 1200;
+        border-radius: 4px;
+        background-color: #b00020;
+        color: #ffffff;
+        font-size: 0.9em;
+      }
 
-p.small a {
-  color: lightcoral;
-}
+      #message[hidden] {
+        display: none;
+      }
 
-.glitchButton {
-  z-index: 1000;
-}
-	  
-	  
-	  
+      /* Bouton de fermeture du bandeau : le message ne doit pas masquer
+         durablement le haut de la carte quand l'erreur n'est pas bloquante */
+      #message-close {
+        font-size: 1em;
+        font-weight: bold;
+        margin-left: 0.6em;
+        padding: 0 0.4em;
+        border: solid 1px #ffffff;
+        background-color: transparent;
+        color: #ffffff;
+      }
+
+      /* Affiché uniquement quand JavaScript est désactivé (voir <noscript>) */
+      #noscript-message {
+        display: none;
+      }
     </style>
+
+    <noscript>
+      <style>
+        /* Sans JavaScript : ni carte ni boutons actifs, on l'annonce au lieu de
+           laisser le message « Chargement… » figé indéfiniment */
+        #loader {
+          display: none;
+        }
+
+        #controls {
+          opacity: 0.5;
+          pointer-events: none;
+        }
+
+        #noscript-message {
+          display: block;
+        }
+      </style>
+    </noscript>
 
     <link rel="stylesheet" href="https://js.arcgis.com/4.19/esri/themes/light/main.css">
     <script src="https://js.arcgis.com/4.19/"></script>
-
-    <script>
-      require(["esri/config","esri/Map", "esri/views/MapView"], function (esriConfig,Map, MapView) {
-
-
-        let map = new Map({
-          basemap: "topo-vector" // Basemap layer service
-        });
-
-        const view = new MapView({
-          map: map,
-          center: [32.35, 30.55], // Canal de Suez
-          zoom: 13,
-          container: "viewDiv"
-        });
-  	  let evergiven = document.getElementById("evergiven");
-	  let rotation = 0;
-let scale = 1.0;
-let scaling = false;
-let infoHidden = false;
-
-let scalecheck = document.getElementById("scalecheck");
-let scaletext = document.getElementById("scaletext");
-
-function turnScaleOn() {
-  scaling = true;
-  scalecheck.innerHTML = "✅";
-  scaletext.innerHTML = "is";
-  warpScale();
-}
-
-function turnScaleOff(resetScale) {
-  scaling = false;
-  scalecheck.innerHTML = "🔲";
-  scaletext.innerHTML = "isn't";
-  if (resetScale) {
-    scale = 1.0;
-  }
-  evergiven.style.transform = `translate(-50%,-50%) rotate(${rotation}deg) scale(${scale})`;
-}
-
-function warpScale() {
-  let metersPerPx =
-    (156543.03392 * Math.cos((view.center.latitude * Math.PI) / 180)) / //view.center.latitude
-    Math.pow(2, view.zoom);                                        //console.log(view.zoom);
-  scale = 1 / metersPerPx;
-  evergiven.style.transform = `translate(-50%,-50%) rotate(${rotation}deg) scale(${scale})`;
-}
-
-	 document.getElementById("rotator").addEventListener("click", e => {
-  rotation = rotation + 10;
-  evergiven.style.transform = `translate(-50%,-50%) rotate(${rotation}deg) scale(${scale})`;
-});
-
-document.getElementById("scale-bigger").addEventListener("click", e => {
-  turnScaleOff(false);
-  scale = scale + 0.05;
-  evergiven.style.transform = `translate(-50%,-50%) rotate(${rotation}deg) scale(${scale})`;
-});
-
-document.getElementById("scale-smaller").addEventListener("click", e => {
-  turnScaleOff(false);
-  scale = scale - 0.05;
-  evergiven.style.transform = `translate(-50%,-50%) rotate(${rotation}deg) scale(${scale})`;
-});
-
-document.getElementById("scaler").addEventListener("click", e => {
-  scaling ? turnScaleOff(true) : turnScaleOn();
-}); 
-
-view.watch("zoom", () => {
-  if (scaling) {
-    warpScale();
-  }
-});
-      });	  
-	  
-    </script>
-
   </head>
   <body>
+    <header>
+      <h1>Ever Given, canal de Suez, mars 2021</h1>
+      <p id="intro">
+        Le porte-conteneurs Ever Given (400 m de long) a bloqué le canal de Suez du 23 au 29 mars 2021.
+        Activez « Navire à l'échelle » pour comparer sa taille réelle à la carte.
+      </p>
+      <p id="credit">
+        Image du navire : asset du remix Glitch d'origine, archivé le 28/11/2021 par la
+        <a
+          href="https://web.archive.org/web/20211128/https://cdn.glitch.com/40d83f73-34cc-401e-90f3-d6b2f92f2b01%2Fevergiven.png"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Wayback Machine</a
+        >. Licence non documentée.
+      </p>
+    </header>
+
+    <div id="controls">
       <button id="rotator">
-        ⤵️ Rotate the boat
+        <span aria-hidden="true">⤵️</span> Pivoter le navire
       </button>
 
       <button id="scale-bigger">
-        ➕ Make the boat bigger
+        <span aria-hidden="true">➕</span> Agrandir
       </button>
 
       <button id="scale-smaller">
-        ➖ Make the boat smaller
+        <span aria-hidden="true">➖</span> Réduire
       </button>
 
-      <button id="scaler" class="notactive">
-        <span id="scalecheck">🔲</span> Boat <span id="scaletext">isn't</span> to scale
+      <button id="scaler" class="notactive" aria-pressed="false">
+        <span id="scalecheck" aria-hidden="true">🔲</span> Navire <span id="scaletext">pas à l'échelle</span>
       </button>
-	<div id="viewDiv">      <img
+
+      <button id="reset" class="notactive">
+        <span aria-hidden="true">↩️</span> Réinitialiser
+      </button>
+
+      <p id="readout" aria-live="polite"></p>
+    </div>
+
+    <div id="container">
+      <div id="viewDiv"></div>
+      <!-- Image du navire : copie locale de l'asset du remix Glitch d'origine
+           (cdn.glitch.com, hébergement arrêté en 2025), récupérée sur la Wayback Machine
+           (capture du 28/11/2021) et recompressée en PNG 256 couleurs (1214 x 190 px).
+           Licence non documentée. La coque couvre toute la largeur de l'image :
+           la largeur affichée (400 px, moins sur petit écran) vaut 400 m
+           (longueur réelle 399,94 m). -->
+      <img
         id="evergiven"
-        src="https://cdn.glitch.com/40d83f73-34cc-401e-90f3-d6b2f92f2b01%2Fevergiven.png?v=1616949352560"
-        alt="Evergiven"
-      /></div>
-  
-  
+        src="evergiven.png"
+        alt="Vue aérienne du porte-conteneurs Ever Given"
+        width="400"
+        height="63"
+        loading="eager"
+      />
+      <div id="loader" role="status">Chargement de la carte…</div>
+      <p id="message" role="alert" hidden>
+        <span id="message-text"></span>
+        <button type="button" id="message-close" aria-label="Fermer le message">
+          <span aria-hidden="true">✕</span>
+        </button>
+      </p>
+      <p id="noscript-message">
+        Cette carte nécessite JavaScript. Activez-le, puis rechargez la page.
+      </p>
+    </div>
+
+    <script>
+      // Longueur réelle de l'Ever Given (399,94 m) et largeur CSS de référence
+      // de l'image : le mode « à l'échelle » part de « largeur rendue = 400 m ».
+      // IMG_WIDTH_PX ne sert plus que de repli, la largeur réelle est relue
+      // dans le DOM (voir imgWidthPx()) car elle est réduite sur petit écran.
+      const SHIP_LENGTH_M = 400;
+      const IMG_WIDTH_PX = 400;
+      const MIN_SCALE = 0.05;
+      // Borne haute symétrique de MIN_SCALE : au-delà l'image couvre tout le
+      // conteneur et la carte devient invisible, sans retour possible
+      const MAX_SCALE = 10;
+      // Délai au-delà duquel on considère que la carte ne se chargera pas
+      // (chargement mesuré ~8 s, marge large pour les connexions lentes)
+      const MAP_TIMEOUT_MS = 25000;
+      // Vue d'origine : site de l'échouement du 23 mars 2021 (km 151, au sud du Grand Lac Amer)
+      const HOME_CENTER = [32.580, 30.0175];
+      const HOME_ZOOM = 16;
+
+      const evergiven = document.getElementById("evergiven");
+      const loader = document.getElementById("loader");
+      const message = document.getElementById("message");
+      const messageText = document.getElementById("message-text");
+      const readout = document.getElementById("readout");
+
+      // true quand le bandeau affiché n'est que l'avertissement de lenteur :
+      // on l'efface si la carte finit par s'afficher, les vraies erreurs restent
+      let messageIsWatchdog = false;
+
+      function showMessage(text, isWatchdog) {
+        messageText.textContent = text;
+        message.hidden = false;
+        messageIsWatchdog = Boolean(isWatchdog);
+      }
+
+      document.getElementById("message-close").addEventListener("click", () => {
+        message.hidden = true;
+        messageIsWatchdog = false;
+      });
+
+      // Largeur réellement rendue de l'image, hors transform CSS : elle vaut
+      // 400 px sur grand écran mais moins sur mobile (width: min(400px, 94%))
+      function imgWidthPx() {
+        return evergiven.offsetWidth || IMG_WIDTH_PX;
+      }
+
+      // Panne visible si l'image du navire ne se charge pas (plus d'échec silencieux)
+      function onImageError() {
+        evergiven.hidden = true;
+        showMessage("Image du navire indisponible : le fichier evergiven.png n'a pas pu être chargé.");
+      }
+      evergiven.addEventListener("error", onImageError);
+      if (evergiven.complete && evergiven.naturalWidth === 0) {
+        onImageError();
+      }
+
+      if (typeof require !== "function") {
+        loader.hidden = true;
+        showMessage("Carte indisponible : l'API ArcGIS (js.arcgis.com) n'a pas pu être chargée.");
+      } else {
+        // Garde-fou : si la carte n'est toujours pas prête au bout de MAP_TIMEOUT_MS
+        // (modules AMD bloqués, réseau coupé), on prévient l'utilisateur au lieu de
+        // laisser l'écran « Chargement… » figé indéfiniment
+        const mapWatchdog = setTimeout(() => {
+          loader.hidden = true;
+          if (message.hidden) {
+            showMessage(
+              "Carte indisponible : le chargement a échoué ou dure anormalement longtemps. Vérifiez votre connexion, puis rechargez la page.",
+              true
+            );
+          }
+        }, MAP_TIMEOUT_MS);
+
+        require(["esri/Map", "esri/views/MapView"], function (Map, MapView) {
+          const map = new Map({
+            basemap: "topo-vector" // Basemap layer service
+          });
+
+          const view = new MapView({
+            map: map,
+            // Canal de Suez, site de l'échouement du 23 mars 2021 (km 151, au sud du Grand Lac Amer)
+            center: HOME_CENTER,
+            zoom: HOME_ZOOM,
+            container: "viewDiv"
+          });
+
+          view.when(() => {
+            clearTimeout(mapWatchdog);
+            loader.hidden = true;
+            // La carte est finalement là : on retire l'avertissement de lenteur
+            if (messageIsWatchdog) {
+              message.hidden = true;
+              messageIsWatchdog = false;
+            }
+          }).catch((err) => {
+            clearTimeout(mapWatchdog);
+            loader.hidden = true;
+            showMessage("Carte indisponible : " + (err && err.message ? err.message : err));
+          });
+
+          const scaler = document.getElementById("scaler");
+          const scalecheck = document.getElementById("scalecheck");
+          const scaletext = document.getElementById("scaletext");
+
+          let rotation = 0;
+          let scale = 1.0;
+          let scaling = false;
+
+          function applyTransform() {
+            evergiven.style.transform = `translate(-50%,-50%) rotate(${rotation}deg) scale(${scale})`;
+            updateReadout();
+          }
+
+          // Restitue l'état courant : cap, taille rendue du navire et, en mode
+          // « à l'échelle », l'équivalence mètres / pixels calculée par warpScale()
+          function updateReadout() {
+            const widthPx = imgWidthPx() * scale;
+            // en dessous du pixel (carte très dézoomée), arrondir afficherait « 0 px »
+            const widthTxt = widthPx < 1 ? "moins de 1 px" : Math.round(widthPx) + " px";
+            readout.textContent = scaling
+              ? `Cap ${rotation}° · navire ${widthTxt} = ${SHIP_LENGTH_M} m (à l'échelle de la carte)`
+              : `Cap ${rotation}° · navire ${widthTxt} (hors échelle)`;
+          }
+
+          function turnScaleOn() {
+            scaling = true;
+            scalecheck.textContent = "✅";
+            scaletext.textContent = "à l'échelle";
+            scaler.classList.remove("notactive");
+            scaler.setAttribute("aria-pressed", "true");
+            warpScale();
+          }
+
+          function turnScaleOff(resetScale) {
+            scaling = false;
+            scalecheck.textContent = "🔲";
+            scaletext.textContent = "pas à l'échelle";
+            scaler.classList.add("notactive");
+            scaler.setAttribute("aria-pressed", "false");
+            if (resetScale) {
+              scale = 1.0;
+            }
+            applyTransform();
+          }
+
+          // Résolution sol en Web Mercator (tuiles 256 px) : 156543.03392 * cos(lat) / 2^zoom
+          function warpScale() {
+            const metersPerPx =
+              (156543.03392 * Math.cos((view.center.latitude * Math.PI) / 180)) /
+              Math.pow(2, view.zoom);
+            scale = SHIP_LENGTH_M / metersPerPx / imgWidthPx();
+            applyTransform();
+          }
+
+          document.getElementById("rotator").addEventListener("click", () => {
+            rotation = (rotation + 10) % 360;
+            applyTransform();
+          });
+
+          document.getElementById("scale-bigger").addEventListener("click", () => {
+            turnScaleOff(false);
+            scale = Math.min(MAX_SCALE, scale + 0.05);
+            applyTransform();
+          });
+
+          document.getElementById("scale-smaller").addEventListener("click", () => {
+            turnScaleOff(false);
+            scale = Math.max(MIN_SCALE, scale - 0.05);
+            applyTransform();
+          });
+
+          scaler.addEventListener("click", () => {
+            scaling ? turnScaleOff(true) : turnScaleOn();
+          });
+
+          // Retour à l'état initial : navire droit, taille par défaut, vue du canal
+          document.getElementById("reset").addEventListener("click", () => {
+            rotation = 0;
+            turnScaleOff(true);
+            view.goTo({ center: HOME_CENTER, zoom: HOME_ZOOM }).catch(() => {
+              // déplacement interrompu par l'utilisateur : rien à signaler
+            });
+          });
+
+          // Le facteur dépend du zoom ET de la latitude du centre : sans le watch
+          // sur « center », le navire restait figé à l'échelle de l'ancienne
+          // latitude dès qu'on déplaçait la carte vers le nord ou le sud
+          view.watch(["zoom", "center"], () => {
+            if (scaling) {
+              warpScale();
+            }
+          });
+
+          // La largeur de référence dépend de celle du conteneur sur petit écran :
+          // on recalcule aussi au redimensionnement / changement d'orientation
+          window.addEventListener("resize", () => {
+            if (scaling) {
+              warpScale();
+            } else {
+              updateReadout();
+            }
+          });
+
+          updateReadout();
+        }, () => {
+          // Échec signalé par le chargeur AMD (réseau ou CDN indisponible)
+          clearTimeout(mapWatchdog);
+          loader.hidden = true;
+          showMessage("Carte indisponible : les modules ArcGIS n'ont pas pu être chargés.");
+        });
+      }
+    </script>
   </body>
 </html>
