@@ -2,12 +2,21 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NukeMap — Simulation nucléaire</title>
+  <meta name="description" content="Simulation cartographique des effets d'une explosion nucléaire : zones de souffle, boule de feu et rayonnement thermique, estimation des victimes selon la densité de population." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%92%A5%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/dark/main.css">
   <script src="https://js.arcgis.com/4.30/"></script>
   <style>
     html, body, #viewDiv { padding:0; margin:0; height:100%; width:100%; }
+
+    /* Les blocs bornés en hauteur (panneau, contrôles, pile mobile) défilent quand la
+       fenêtre est trop courte : barre fine et visible pour que le contenu au-delà du
+       cadre soit repérable au lieu de sembler tronqué. */
+    #panel, #controls, #zones-section, #bottom-stack {
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.3) transparent;
+    }
 
     /* ── Panel top-left ── */
     #panel {
@@ -19,20 +28,29 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       color: #e8e0d5; min-width: 270px;
       backdrop-filter: blur(8px);
+      /* Borne la hauteur : le panneau grandit avec le tableau des zones (5 lignes) et
+         recouvrait la légende ancrée en bas à gauche sur les viewports courts
+         (téléphone en paysage, petite fenêtre desktop). La marge est relative à la
+         hauteur de la vue, donc l'écart avec la légende reste positif à toute taille.
+         En colonne flex, c'est le tableau des zones qui défile : les KPI et le bouton
+         d'effacement restent visibles même quand la place manque. */
+      max-height: calc(100vh - 200px); overflow-y: auto;
+      display: flex; flex-direction: column;
     }
-    #panel h2 { font-size: 15px; font-weight: 700; color: white; margin: 0 0 2px; }
-    #panel .sub { font-size: 11px; color: #7a6f8a; margin-bottom: 12px; }
+    #panel > * { flex: 0 0 auto; }
+    #panel h1 { font-size: 15px; font-weight: 700; color: white; margin: 0 0 2px; }
+    #panel .sub { font-size: 11px; color: #8f84a0; margin-bottom: 12px; }
 
     .kpis { display: flex; gap: 7px; margin-bottom: 8px; }
     .kpi { background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.09); border-radius: 7px; padding: 8px 12px; flex: 1; min-width: 0; }
-    .kpi .kv { font-size: 18px; font-weight: 700; color: white; font-family: monospace; line-height: 1; }
-    .kpi .kl { font-size: 9px; color: #7a6f8a; text-transform: uppercase; letter-spacing: .5px; margin-top: 3px; }
+    .kpi .kv { font-size: 16px; font-weight: 700; color: white; font-family: monospace; line-height: 1; white-space: nowrap; }
+    .kpi .kl { font-size: 9px; color: #8f84a0; text-transform: uppercase; letter-spacing: .5px; margin-top: 3px; }
     .kpi.red    .kv { color: #ef4444; }
     .kpi.orange .kv { color: #f97316; }
     .kpi.yellow .kv { color: #eab308; }
 
     #zones-section { display: none; }
-    #zones-section.visible { display: block; }
+    #zones-section.visible { display: block; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
     .zone-row {
       display: flex; align-items: center; gap: 8px;
       padding: 5px 0; font-size: 11px; color: #c0b8cc;
@@ -41,7 +59,7 @@
     .zone-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .zone-name { flex: 1; }
     .zone-deaths { font-family: monospace; font-size: 10px; color: #ef4444; font-weight: 700; }
-    .zone-r { font-family: monospace; font-size: 10px; color: #7a6f8a; }
+    .zone-r { font-family: monospace; font-size: 10px; color: #8f84a0; }
 
     #reset-btn {
       width: 100%; margin-top: 10px; padding: 7px;
@@ -52,6 +70,9 @@
     #reset-btn:hover { background: rgba(255,255,255,.1); }
 
     /* ── Controls top-right ── */
+    /* #bottom-stack : sans boîte sur desktop (chaque bloc garde sa position absolue),
+       devient une pile en bas d'écran sur mobile (voir media query) */
+    #bottom-stack { display: contents; }
     #controls {
       position: absolute; top: 60px; right: 15px; z-index: 10;
       background: rgba(10,8,18,.93);
@@ -62,15 +83,33 @@
       backdrop-filter: blur(8px);
       min-width: 250px;
       display: flex; flex-direction: column; gap: 12px;
+      /* Même garde-fou que le panneau : #controls grandit avec son contenu (le bouton
+         de détonation clavier l'allonge de ~43 px) et rejoignait le bloc source ancré
+         en bas à droite sur les fenêtres très courtes, jusqu'à intercepter ses clics.
+         Réserve = 60px (top) + 94px (hauteur du bloc source + son bottom) + marge :
+         le bas de #controls reste 16 px au-dessus du haut de #source à toute hauteur. */
+      max-height: calc(100vh - 200px); overflow-y: auto;
     }
-    .ctrl-label { font-size: 10px; color: #7a6f8a; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 5px; }
+    .ctrl-label { display: block; font-size: 10px; color: #8f84a0; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 5px; }
     select.ctrl-select {
       width: 100%; font-size: 12px;
       background: rgba(255,255,255,.07);
       border: 1px solid rgba(255,255,255,.15);
       color: white; padding: 7px 10px; border-radius: 5px; cursor: pointer; outline: none;
     }
+    select.ctrl-select:focus-visible,
+    #reset-btn:focus-visible,
+    #detonate-btn:focus-visible,
+    #banner button:focus-visible { outline: 2px solid #d4a017; outline-offset: 2px; }
     select.ctrl-select option { background: #12101a; }
+
+    #detonate-btn {
+      width: 100%; padding: 7px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.04); color: #e8e0d5;
+      border-radius: 6px; font-size: 11px; cursor: pointer; font-family: inherit;
+    }
+    #detonate-btn:hover { background: rgba(255,255,255,.1); }
 
     /* ── Hint ── */
     #hint {
@@ -92,7 +131,7 @@
       border-radius: 8px; padding: 10px 14px;
       font-family: sans-serif; font-size: 11px; color: #a89aaa;
     }
-    #legend .leg-title { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #7a6f8a; margin-bottom: 6px; }
+    #legend .leg-title { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: #8f84a0; margin-bottom: 6px; }
     .leg-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
     .leg-swatch { width: 28px; height: 10px; border-radius: 3px; flex-shrink: 0; }
 
@@ -102,9 +141,89 @@
       background: rgba(10,8,18,.85);
       border: 1px solid rgba(255,255,255,.08);
       border-radius: 6px; padding: 7px 12px;
-      font-size: 10px; color: #7a6f8a; font-family: sans-serif; text-align: center; line-height: 1.6;
+      font-size: 10px; color: #8f84a0; font-family: sans-serif; text-align: center; line-height: 1.6;
     }
     #source a { color: #d4a017; text-decoration: none; }
+
+    /* ── Chargement / erreurs ── */
+    #loading {
+      position: absolute; inset: 0; z-index: 20; pointer-events: none;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(10,8,18,.55); color: #e8e0d5;
+      font-family: sans-serif; font-size: 13px;
+    }
+    #banner {
+      position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 30;
+      display: flex; align-items: center; gap: 10px; max-width: min(90%, 500px);
+      background: rgba(120,20,20,.95);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 8px; padding: 9px 14px;
+      font-family: sans-serif; font-size: 12px; color: white;
+    }
+    #banner button { background: none; border: 0; color: white; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+    #loading[hidden], #banner[hidden] { display: none; }
+
+    /* ── Mobile : panneau pleine largeur en haut, contrôles + légende + source empilés en bas ──
+       Réservé aux viewports étroits : la pile n'a de sens que sur une seule colonne. Les
+       viewports courts et larges (téléphone en paysage, petite fenêtre desktop) gardent la
+       disposition en colonnes, chaque bloc étant borné en hauteur pour ne jamais atteindre
+       son voisin (voir #panel et #controls max-height ci-dessus). Ici, le panneau (haut) et
+       la pile (bas) sont bornés l'un en fonction de l'autre : 44vh + 56vh = la hauteur de
+       la vue, écart garanti, aucun recouvrement possible quel que soit le contenu. */
+    @media (max-width: 640px) {
+      #panel {
+        top: 10px; left: 10px; right: 10px; min-width: 0;
+        padding: 10px 12px; max-height: 44vh; overflow-y: auto;
+      }
+      #panel .sub { margin-bottom: 8px; }
+      .kpi { padding: 6px 8px; }
+      .kpi .kv { font-size: 15px; }
+      #bottom-stack {
+        display: flex; flex-direction: column; gap: 6px;
+        position: absolute; left: 10px; right: 10px; bottom: 26px; z-index: 10;
+        /* La pile est ancrée en bas et grandit vers le haut : sans borne elle recouvre
+           le panneau (et son bouton « Effacer ») dès que la hauteur manque. Le panneau
+           descend au plus à 10px + 44vh, la pile remonte au plus à 100vh - 26px - cette
+           hauteur : la borne ci-dessous laisse 10 px d'écart garanti à toute hauteur.
+           Au-delà, c'est la pile qui défile — rien n'est masqué. */
+        max-height: calc(56vh - 68px); overflow-y: auto;
+      }
+      #controls, #legend, #source { position: static; min-width: 0; }
+      /* La pile porte déjà la borne de hauteur : pas de second défilement imbriqué. */
+      #controls { padding: 10px 12px; gap: 8px; max-height: none; overflow: visible; }
+      #legend { display: flex; flex-wrap: wrap; gap: 0 12px; padding: 6px 10px; font-size: 10px; }
+      #legend .leg-title { width: 100%; margin-bottom: 2px; }
+      #source { padding: 5px 10px; font-size: 9px; line-height: 1.5; }
+      #hint {
+        bottom: auto; top: 50%; transform: translate(-50%, -50%);
+        white-space: normal; text-align: center; max-width: 80%;
+        font-size: 11px; padding: 8px 14px;
+      }
+      #banner { top: 50%; transform: translate(-50%, -50%); }
+    }
+
+    /* Fenêtre courte (téléphone en paysage, petite fenêtre desktop), toutes largeurs :
+       les blocs sont compactés pour que leurs éléments d'action restent visibles sous
+       les bornes de hauteur — bouton « Effacer » dans le panneau, bouton de détonation
+       dans les contrôles — et que quelques lignes de zones restent lisibles. Rien n'est
+       supprimé : seul le sous-titre décoratif est masqué. */
+    @media (max-height: 520px) {
+      #panel .sub { display: none; }
+      .kpi { padding: 5px 7px; }
+      .kpi .kv { font-size: 14px; }
+      .kpi .kl { font-size: 8px; margin-top: 2px; }
+      .zone-row { padding: 3px 0; }
+      #reset-btn { padding: 5px; margin-top: 6px; }
+      #controls { padding: 10px 12px; gap: 8px; }
+      .ctrl-label { margin-bottom: 3px; }
+      select.ctrl-select { padding: 5px 8px; }
+      #detonate-btn { padding: 5px; }
+    }
+
+    /* Même chose pour le panneau, hors mobile où il a déjà son propre padding réduit. */
+    @media (min-width: 641px) and (max-height: 520px) {
+      #panel { padding: 10px 14px; }
+    }
   </style>
 </head>
 <body>
@@ -112,9 +231,9 @@
 
 <!-- Panel top-left -->
 <div id="panel">
-  <h2>💥 Simulation nucléaire</h2>
+  <h1>💥 Simulation nucléaire</h1>
   <div class="sub">Estimation des dégâts — modèle Glasstone & Dolan</div>
-  <div class="kpis">
+  <div class="kpis" aria-live="polite">
     <div class="kpi orange">
       <div class="kv" id="kv-area">–</div>
       <div class="kl">Surface (km²)</div>
@@ -128,14 +247,15 @@
       <div class="kl">Blessés estimés</div>
     </div>
   </div>
-  <div id="zones-section"></div>
-  <button id="reset-btn">🗑 Effacer la simulation</button>
+  <div id="zones-section" aria-live="polite"></div>
+  <button id="reset-btn" type="button">🗑 Effacer la simulation</button>
 </div>
 
-<!-- Controls top-right -->
+<!-- Controls top-right (+ légende et source : empilés en bas d'écran sur mobile) -->
+<div id="bottom-stack">
 <div id="controls">
   <div>
-    <div class="ctrl-label">Type de bombe</div>
+    <label class="ctrl-label" for="bombSelect">Type de bombe</label>
     <select class="ctrl-select" id="bombSelect">
       <option value="little_boy">Little Boy — 15 kt (Hiroshima, 1945)</option>
       <option value="b61">B61-12 — 50 kt (OTAN / Europe)</option>
@@ -145,7 +265,7 @@
     </select>
   </div>
   <div>
-    <div class="ctrl-label">Densité de population</div>
+    <label class="ctrl-label" for="densitySelect">Densité de population</label>
     <select class="ctrl-select" id="densitySelect">
       <option value="1">Désert / Mer — 1 hab/km²</option>
       <option value="20">Zone rurale — 20 hab/km²</option>
@@ -155,93 +275,89 @@
       <option value="16000">Mégapole (Tokyo) — 16 000 hab/km²</option>
     </select>
   </div>
+  <!-- Accès clavier : la détonation au clic carte n'est pas atteignable au clavier -->
+  <button id="detonate-btn" type="button">💣 Détoner au centre de la carte</button>
 </div>
 
-<!-- Hint -->
-<div id="hint">💣 Cliquez sur la carte pour simuler une détonation</div>
-
-<!-- Legend -->
+<!-- Legend — les lignes sont générées depuis ZONES_REF (couleurs et opacités uniques) -->
 <div id="legend">
   <div class="leg-title">Zones d'effet</div>
-  <div class="leg-row"><div class="leg-swatch" style="background:rgba(255,20,0,.85)"></div> Boule de feu</div>
-  <div class="leg-row"><div class="leg-swatch" style="background:rgba(255,100,0,.70)"></div> Souffle intense (20 psi)</div>
-  <div class="leg-row"><div class="leg-swatch" style="background:rgba(255,190,0,.55)"></div> Souffle modéré (5 psi)</div>
-  <div class="leg-row"><div class="leg-swatch" style="background:rgba(255,80,150,.40)"></div> Rayonnement thermique</div>
-  <div class="leg-row"><div class="leg-swatch" style="background:rgba(100,160,255,.25)"></div> Souffle léger (1 psi)</div>
 </div>
 
 <!-- Source -->
 <div id="source">
-  Modèle : <a href="https://en.wikipedia.org/wiki/Effects_of_nuclear_explosions" target="_blank">Glasstone & Dolan</a>
-  · <a href="https://nuclearsecrecy.com/nukemap/" target="_blank">NUKEMAP ref.</a><br>
-  <em>Estimation éducative — densité uniforme supposée</em>
+  Modèle : <a href="https://en.wikipedia.org/wiki/Effects_of_nuclear_explosions" target="_blank" rel="noopener noreferrer">Glasstone & Dolan</a>
+  · <a href="https://nuclearsecrecy.com/nukemap/" target="_blank" rel="noopener noreferrer">NUKEMAP ref.</a><br>
+  <em>Estimation éducative — densité uniforme supposée,<br>précision réduite au-delà du mégatonne</em>
+</div>
+</div>
+
+<!-- Hint -->
+<div id="hint">💣 Cliquez sur la carte ou cherchez une adresse pour simuler une détonation</div>
+
+<!-- Chargement / erreurs -->
+<div id="loading" role="status">Chargement de la carte…</div>
+<div id="banner" role="alert" hidden>
+  <span id="banner-text"></span>
+  <button id="banner-close" type="button" aria-label="Fermer le message">×</button>
 </div>
 
 <script>
-require([
-  "esri/Map",
-  "esri/views/MapView",
-  "esri/layers/GraphicsLayer",
-  "esri/Graphic",
-  "esri/geometry/geometryEngine",
-  "esri/widgets/Home",
-  "esri/widgets/Search",
-  "esri/widgets/Zoom"
-], function(Map, MapView, GraphicsLayer, Graphic, geometryEngine, Home, Search, Zoom) {
+/* ══ Bandeau d'erreur (API, fond de carte, géocodeur) ══ */
+function showBanner(msg) {
+  document.getElementById("banner-text").textContent = msg;
+  document.getElementById("banner").hidden = false;
+}
+document.getElementById("banner-close").addEventListener("click", function() {
+  document.getElementById("banner").hidden = true;
+});
 
-  /* ══ Données bombes (rayons en km, source: Glasstone / NUKEMAP) ══ */
-  const BOMBS = {
-    little_boy: {
-      name: "Little Boy — 15 kt (Hiroshima)",
-      zones: [
-        { label: "Boule de feu",           radius: 0.20,  color:[255,20,0],    alpha:.88, fatality:1.00, injury:0.00 },
-        { label: "Souffle intense (20 psi)",radius: 0.80,  color:[255,100,0],   alpha:.70, fatality:0.80, injury:0.15 },
-        { label: "Souffle modéré (5 psi)", radius: 1.90,  color:[255,190,0],   alpha:.55, fatality:0.40, injury:0.40 },
-        { label: "Rayonnement thermique",  radius: 2.50,  color:[255,80,150],  alpha:.38, fatality:0.08, injury:0.40 },
-        { label: "Souffle léger (1 psi)",  radius: 5.10,  color:[100,160,255], alpha:.22, fatality:0.02, injury:0.15 }
-      ]
-    },
-    b61: {
-      name: "B61-12 — 50 kt (OTAN)",
-      zones: [
-        { label: "Boule de feu",           radius: 0.38,  color:[255,20,0],    alpha:.88, fatality:1.00, injury:0.00 },
-        { label: "Souffle intense (20 psi)",radius: 1.40,  color:[255,100,0],   alpha:.70, fatality:0.80, injury:0.15 },
-        { label: "Souffle modéré (5 psi)", radius: 3.40,  color:[255,190,0],   alpha:.55, fatality:0.40, injury:0.40 },
-        { label: "Rayonnement thermique",  radius: 6.00,  color:[255,80,150],  alpha:.38, fatality:0.08, injury:0.40 },
-        { label: "Souffle léger (1 psi)",  radius: 9.50,  color:[100,160,255], alpha:.22, fatality:0.02, injury:0.15 }
-      ]
-    },
-    w88: {
-      name: "W88 — 475 kt (Trident II, USA)",
-      zones: [
-        { label: "Boule de feu",           radius: 1.10,  color:[255,20,0],    alpha:.88, fatality:1.00, injury:0.00 },
-        { label: "Souffle intense (20 psi)",radius: 4.20,  color:[255,100,0],   alpha:.70, fatality:0.80, injury:0.15 },
-        { label: "Souffle modéré (5 psi)", radius: 10.20, color:[255,190,0],   alpha:.55, fatality:0.40, injury:0.40 },
-        { label: "Rayonnement thermique",  radius: 22.00, color:[255,80,150],  alpha:.38, fatality:0.08, injury:0.40 },
-        { label: "Souffle léger (1 psi)",  radius: 28.00, color:[100,160,255], alpha:.22, fatality:0.02, injury:0.15 }
-      ]
-    },
-    b83: {
-      name: "B83 — 1,2 Mt (USA)",
-      zones: [
-        { label: "Boule de feu",           radius: 2.00,  color:[255,20,0],    alpha:.88, fatality:1.00, injury:0.00 },
-        { label: "Souffle intense (20 psi)",radius: 7.40,  color:[255,100,0],   alpha:.70, fatality:0.80, injury:0.15 },
-        { label: "Souffle modéré (5 psi)", radius: 17.80, color:[255,190,0],   alpha:.55, fatality:0.40, injury:0.40 },
-        { label: "Rayonnement thermique",  radius: 42.00, color:[255,80,150],  alpha:.38, fatality:0.08, injury:0.40 },
-        { label: "Souffle léger (1 psi)",  radius: 48.50, color:[100,160,255], alpha:.22, fatality:0.02, injury:0.15 }
-      ]
-    },
-    tsar: {
-      name: "Tsar Bomba — 50 Mt (URSS, 1961)",
-      zones: [
-        { label: "Boule de feu",           radius: 8.50,  color:[255,20,0],    alpha:.88, fatality:1.00, injury:0.00 },
-        { label: "Souffle intense (20 psi)",radius: 47.00, color:[255,100,0],   alpha:.70, fatality:0.80, injury:0.15 },
-        { label: "Souffle modéré (5 psi)", radius: 113.0, color:[255,190,0],   alpha:.55, fatality:0.40, injury:0.40 },
-        { label: "Rayonnement thermique",  radius: 200.0, color:[255,80,150],  alpha:.38, fatality:0.08, injury:0.40 },
-        { label: "Souffle léger (1 psi)",  radius: 310.0, color:[100,160,255], alpha:.22, fatality:0.02, injury:0.15 }
-      ]
-    }
-  };
+/* ══ Données bombes ══
+   Seule la puissance (kt) est saisie par bombe ; les rayons sont dérivés de la
+   ligne de référence Little Boy (15 kt, ordres de grandeur NUKEMAP) par les lois
+   d'échelle de Glasstone & Dolan : rayon ∝ Y^(1/3) pour la surpression
+   (20, 5 et 1 psi), ≈ Y^0.41 pour la boule de feu et le rayonnement thermique.
+   Hors de startApp : la légende reste affichée même si le CDN ArcGIS est injoignable. */
+const REF_YIELD_KT = 15;
+const ZONES_REF = [
+  { label: "Boule de feu",           radius: 0.20, exp: 0.41, color:[255,20,0],    alpha:.88, fatality:1.00, injury:0.00 },
+  { label: "Souffle intense (20 psi)",radius: 0.80, exp: 1/3,  color:[255,100,0],   alpha:.70, fatality:0.80, injury:0.15 },
+  { label: "Souffle modéré (5 psi)", radius: 1.90, exp: 1/3,  color:[255,190,0],   alpha:.55, fatality:0.40, injury:0.40 },
+  { label: "Rayonnement thermique",  radius: 2.50, exp: 0.41, color:[255,80,150],  alpha:.38, fatality:0.08, injury:0.40 },
+  { label: "Souffle léger (1 psi)",  radius: 5.10, exp: 1/3,  color:[100,160,255], alpha:.22, fatality:0.02, injury:0.15 }
+];
+const BOMBS = {
+  little_boy: { name: "Little Boy — 15 kt (Hiroshima)",    yieldKt: 15 },
+  b61:        { name: "B61-12 — 50 kt (OTAN)",             yieldKt: 50 },
+  w88:        { name: "W88 — 475 kt (Trident II, USA)",    yieldKt: 475 },
+  b83:        { name: "B83 — 1,2 Mt (USA)",                yieldKt: 1200 },
+  tsar:       { name: "Tsar Bomba — 50 Mt (URSS, 1961)",   yieldKt: 50000 }
+};
+// Zones de chaque bombe (rayons en km), triées du plus petit au plus grand rayon
+Object.keys(BOMBS).forEach(function(key) {
+  var bomb = BOMBS[key];
+  bomb.zones = ZONES_REF.map(function(z) {
+    return Object.assign({}, z, { radius: z.radius * Math.pow(bomb.yieldKt / REF_YIELD_KT, z.exp) });
+  }).sort(function(a, b) { return a.radius - b.radius; });
+});
+
+/* Légende générée depuis ZONES_REF : couleurs et opacités viennent de la même
+   source que les zones tracées, donc aucune divergence possible. */
+(function buildLegend() {
+  var legend = document.getElementById("legend");
+  ZONES_REF.forEach(function(z) {
+    var row = document.createElement("div");
+    row.className = "leg-row";
+    var sw = document.createElement("div");
+    sw.className = "leg-swatch";
+    sw.style.background = "rgba(" + z.color.join(",") + "," + z.alpha + ")";
+    row.appendChild(sw);
+    row.appendChild(document.createTextNode(" " + z.label));
+    legend.appendChild(row);
+  });
+})();
+
+function startApp(Map, MapView, GraphicsLayer, Graphic, geometryEngine, Home, Search) {
 
   /* ══ Map ══ */
   const map = new Map({ basemap: "dark-gray-vector" });
@@ -277,7 +393,10 @@ require([
       }
     }));
 
-    // Zones — du plus grand au plus petit (superposition correcte)
+    // Zones — du plus grand au plus petit (superposition correcte).
+    // Buffers géodésiques : cercles corrects à toute latitude malgré le Web Mercator.
+    // NB : geometryEngine est déprécié à partir de 4.32 au profit de
+    // esri/geometry/operators/geodesicBufferOperator — à migrer lors d'une montée de version.
     bomb.zones.slice().reverse().forEach(function(z) {
       const buf = geometryEngine.geodesicBuffer(point, z.radius, "kilometers");
       bufferLayer.add(new Graphic({
@@ -290,14 +409,26 @@ require([
       }));
     });
 
+    fitToZones(bufferLayer.graphics.getItemAt(0).geometry);
     updatePanel(bomb, density);
     document.getElementById("hint").classList.add("hidden");
   }
 
+  /* Recadre la vue si l'anneau externe est quasi invisible (< 40 px) ou déborde de la vue ;
+     ne touche pas à une vue où les zones sont déjà lisibles. */
+  function fitToZones(outerGeom) {
+    var ext = outerGeom.extent;
+    var radiusPx = ext.width / view.resolution / 2;
+    var visible = view.extent && view.extent.contains(ext);
+    if (radiusPx >= 40 && visible) return;
+    view.goTo(ext.expand(1.8), { duration: 600 }).catch(function() {});
+  }
+
   /* ══ Statistiques ══ */
   function fmt(n) {
-    if (n >= 1e6) return (n / 1e6).toFixed(2).replace('.', ',') + ' M';
-    if (n >= 1e3) return (n / 1e3).toFixed(0) + ' k';
+    if (n >= 1e9) return (n / 1e9).toLocaleString("fr-FR", { maximumFractionDigits: 2 }) + ' Md';
+    if (n >= 1e6) return (n / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 }) + ' M';
+    if (n >= 1e3) return (n / 1e3).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + ' k';
     return n.toLocaleString("fr-FR");
   }
 
@@ -341,10 +472,13 @@ require([
 
   /* ══ Événements ══ */
   view.on("click", function(evt) {
-    var pt = evt.mapPoint;
-    pt.hasZ = false;
-    pt.z = undefined;
-    explode(pt);
+    explode(evt.mapPoint);
+  });
+
+  // Équivalent clavier du clic carte : l'utilisateur cadre la zone (flèches sur la
+  // vue, ou recherche d'adresse) puis déclenche la détonation au centre.
+  document.getElementById("detonate-btn").addEventListener("click", function() {
+    if (view.center) explode(view.center.clone());
   });
 
   document.getElementById("bombSelect").addEventListener("change", function() {
@@ -374,15 +508,91 @@ require([
     document.getElementById("hint").classList.remove("hidden");
   });
 
+  /* ══ Mobile : réserver aux widgets Esri et au recadrage la bande libre
+     entre le panneau (haut) et la pile contrôles/légende/source (bas) ══ */
+  var mobileMq = window.matchMedia("(max-width: 640px)");
+  function updatePadding() {
+    if (!mobileMq.matches) { view.padding = { top: 0, right: 0, bottom: 0, left: 0 }; return; }
+    var panel = document.getElementById("panel").getBoundingClientRect();
+    var stack = document.getElementById("bottom-stack").getBoundingClientRect();
+    view.padding = {
+      top: Math.ceil(panel.bottom) + 4, right: 0,
+      bottom: Math.ceil(window.innerHeight - stack.top) + 4, left: 0
+    };
+  }
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(updatePadding);
+    ro.observe(document.getElementById("panel"));
+    ro.observe(document.getElementById("bottom-stack"));
+  }
+  window.addEventListener("resize", updatePadding);
+  updatePadding();
+
   /* ══ Widgets ══ */
-  view.when(function() {
-    view.ui.remove("zoom");
-    view.ui.add(new Zoom({ view: view }), { position: "top-left", index: 0 });
-    view.ui.add(new Home({ view: view }), { position: "top-left", index: 1 });
-    view.ui.add(new Search({ view: view }), { position: "top-right", index: 0 });
+  // Géocodeur Esri (geocode.arcgis.com) utilisé en accès anonyme, sans clé API
+  var search = new Search({
+    view: view,
+    popupEnabled: false,          // pas de popup qui masque le centre de la carte
+    resultGraphicEnabled: false   // l'épicentre remplace le marqueur de résultat
+  });
+  // Adresse trouvée → détonation directement à cet endroit
+  search.on("select-result", function(e) {
+    var geom = e.result && e.result.feature && e.result.feature.geometry;
+    if (geom) explode(geom);
+  });
+  search.on("search-complete", function(e) {
+    if (e.numErrors > 0) {
+      // En 4.x le tableau errors contient directement des Error ; on tolère aussi
+      // la forme { error } des anciennes versions pour remonter le message réel.
+      var e0 = e.errors[0];
+      var err = (e0 && e0.error) || e0;
+      showBanner("Recherche d'adresse indisponible : " + (err && err.message ? err.message : "erreur du géocodeur"));
+    }
   });
 
-});
+  view.when(function() {
+    document.getElementById("loading").hidden = true;
+    view.ui.add(new Home({ view: view }), { position: "top-left", index: 1 });
+    view.ui.add(search, { position: "top-right", index: 0 });
+  }, function(err) {
+    document.getElementById("loading").hidden = true;
+    showBanner("Carte indisponible : " + (err && err.message ? err.message : err));
+  });
+  // Fond de carte (basemaps.arcgis.com) qui ne se charge pas
+  view.on("layerview-create-error", function(e) {
+    showBanner("Fond de carte indisponible : " + (e.error && e.error.message ? e.error.message : "erreur de chargement"));
+  });
+
+}
+
+/* ══ Démarrage — garde-fou si le CDN ArcGIS (js.arcgis.com) est injoignable ══ */
+function showCdnBanner() {
+  document.getElementById("loading").hidden = true;
+  showBanner("Impossible de charger l'API ArcGIS (js.arcgis.com injoignable). Vérifiez votre connexion puis rechargez la page.");
+}
+
+if (typeof require === "function") {
+  // Le loader se charge mais un module échoue (CDN partiellement injoignable) : sans ce
+  // garde-fou startApp ne s'exécute jamais et l'écran de chargement reste indéfiniment.
+  // Limité à la phase de démarrage (écran de chargement encore visible) pour ne pas
+  // réagir aux modules optionnels chargés à la demande une fois la carte prête.
+  if (typeof require.on === "function") {
+    require.on("error", function() {
+      if (!document.getElementById("loading").hidden) showCdnBanner();
+    });
+  }
+  require([
+    "esri/Map",
+    "esri/views/MapView",
+    "esri/layers/GraphicsLayer",
+    "esri/Graphic",
+    "esri/geometry/geometryEngine",
+    "esri/widgets/Home",
+    "esri/widgets/Search"
+  ], startApp);
+} else {
+  showCdnBanner();
+}
 </script>
 </body>
 </html>
