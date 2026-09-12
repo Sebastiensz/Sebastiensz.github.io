@@ -2,16 +2,22 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="initial-scale=1,maximum-scale=1,user-scalable=no"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
   ArcGIS API for JavaScript, https://js.arcgis.com
   For more information about the import-gltf sample, read the original sample description at developers.arcgis.com.
   https://developers.arcgis.com/javascript/latest/sample-code/import-gltf/index.html
   -->
 <title>To the Moon - Modèle 3D glTF</title>
+    <meta
+      name="description"
+      content="Scène 3D ArcGIS : placez des modèles glTF (fusée, canoë) dans la scène."
+    />
+    <meta property="og:title" content="To the Moon - Modèle 3D glTF" />
+    <meta
+      property="og:description"
+      content="Scène 3D ArcGIS : placez des modèles glTF (fusée, canoë) dans la scène."
+    />
 
     <link
       rel="stylesheet"
@@ -36,21 +42,65 @@
         font-size: 1.1em;
       }
 
+      #status {
+        font-size: 0.8em;
+        line-height: 1.2em;
+        margin: 8px 0 0;
+        min-height: 1.2em;
+      }
+
+      #status.status--error {
+        color: #a02020;
+      }
+
       #credits {
-        font-size: 0.7em;
-        line-height: 1.1em;
+        font-size: 0.8em;
+        line-height: 1.2em;
+      }
+
+      /* Écran d'attente : la scène 3D met plusieurs secondes à s'afficher. */
+      #loading {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 24px;
+        background-color: #ffffff;
+        color: #323232;
+        font-family: "Avenir Next W00", "Helvetica Neue", Helvetica, Arial,
+          sans-serif;
+        font-size: 1.1em;
+        text-align: center;
+      }
+
+      #loading.is-hidden {
+        display: none;
+      }
+
+      #loading.loading--error {
+        color: #a02020;
       }
     </style>
     <script>
       require([
         "esri/views/SceneView",
         "esri/WebScene",
-        "esri/Map",
         "esri/layers/GraphicsLayer",
-        "esri/widgets/Sketch/SketchViewModel","esri/config"
-      ], function(SceneView, WebScene, Map, GraphicsLayer, SketchViewModel,esriConfig) {
+        "esri/widgets/Sketch/SketchViewModel"
+      ], function(SceneView, WebScene, GraphicsLayer, SketchViewModel) {
+        // Modèles glTF servis par le dépôt, en chemin relatif à cette page.
+        // Les anciennes URL distantes (dépôt GitHub supprimé, échantillon Esri
+        // retiré) renvoyaient 404 : aucun modèle ne s'affichait après un clic.
+        const ROCKET_MODEL = "./scene.gltf";
+        const CANOE_MODEL = "./canoe.glb";
+
         // load web scene from ArcGIS Online
-		//esriConfig.defaults.io.corsEnabledServers.push("https://github.com/");
         const webScene = new WebScene({
           portalItem: {
             // autocasts as new PortalItem()
@@ -66,67 +116,38 @@
         const graphicsLayer = new GraphicsLayer();
         view.map.add(graphicsLayer);
 
-        const tentBtn = document.getElementById("tent");
+        const rocketBtn = document.getElementById("rocket");
         const canoeBtn = document.getElementById("canoe");
+        const clearBtn = document.getElementById("clear");
+        const statusDiv = document.getElementById("status");
+        const loadingDiv = document.getElementById("loading");
 
-        view
-          .when(function() {
-            // This sample uses the SketchViewModel to add points to a
-            // GraphicsLayer. The points have 3D glTF models as symbols.
-            const sketchVM = new SketchViewModel({
-              layer: graphicsLayer,
-              view: view
-            });
+        function setStatus(message, isError) {
+          statusDiv.textContent = message;
+          statusDiv.classList.toggle("status--error", isError === true);
+        }
 
-            tentBtn.addEventListener("click", function() {
-              // reference the relative path to the glTF model
-              // in the resource of an ObjectSymbol3DLayer
-              sketchVM.pointSymbol = {
-                type: "point-3d",
-                symbolLayers: [
-                  {
-                    type: "object",
-					height:10,
-                    resource: {
-                      href:
-                        "https://raw.githubusercontent.com/Sebastiensz/test/master/scene.gltf"
-                    }
-                  }
-                ]
-              };
-              sketchVM.create("point");
-              deactivateButtons();
-              this.classList.add("esri-button--secondary");
-            });
-
-            canoeBtn.addEventListener("click", function() {
-              // reference the relative path to the glTF model
-              // in the resource of an ObjectSymbol3DLayer
-              sketchVM.pointSymbol = {
-                type: "point-3d",
-                symbolLayers: [
-                  {
-                    type: "object",
-                    resource: {
-                      href:
-                        'https://developers.arcgis.com/javascript/latest/sample-code/import-gltf/live/canoe.glb'
-                    }
-                  }
-                ]
-              };
-              deactivateButtons();
-              sketchVM.create("point");
-              this.classList.add("esri-button--secondary");
-            });
-
-            sketchVM.on("create", function(event) {
-              if (event.state === "complete") {
-                sketchVM.update(event.graphic);
-                deactivateButtons();
+        // Vérifie que le modèle est bien servi. S'il ne l'est pas, le bouton
+        // est désactivé et l'utilisateur prévenu, au lieu d'un point placé
+        // dans la scène sans aucun objet visible dedans.
+        function checkModel(button, href, label) {
+          // cache: "no-store" pour interroger réellement le serveur : une
+          // réponse gardée en cache masquerait un fichier devenu introuvable.
+          fetch(href, { method: "HEAD", cache: "no-store" })
+            .then(function(response) {
+              // 405 : le serveur refuse HEAD, on ne peut rien en conclure.
+              if (!response.ok && response.status !== 405) {
+                throw new Error("HTTP " + response.status);
               }
+            })
+            .catch(function(error) {
+              console.error("Modèle 3D indisponible : " + href, error);
+              button.disabled = true;
+              button.classList.add("esri-button--disabled");
+              button.title = "Modèle indisponible : " + href;
+              setStatus("Modèle « " + label + " » indisponible.", true);
             });
-          })
-          .catch(console.error);
+        }
 
         function deactivateButtons() {
           const elements = Array.prototype.slice.call(
@@ -134,8 +155,100 @@
           );
           elements.forEach(function(element) {
             element.classList.remove("esri-button--secondary");
+            if (element.hasAttribute("aria-pressed")) {
+              element.setAttribute("aria-pressed", "false");
+            }
           });
         }
+
+        view
+          .when(function() {
+            loadingDiv.classList.add("is-hidden");
+
+            // This sample uses the SketchViewModel to add points to a
+            // GraphicsLayer. The points have 3D glTF models as symbols.
+            const sketchVM = new SketchViewModel({
+              layer: graphicsLayer,
+              view: view
+            });
+
+            // Hauteur explicite (en mètres) pour les deux modèles : sans elle,
+            // le canoë s'affichait à son échelle native (~0,18 m de haut),
+            // sans rapport avec la fusée.
+            function activateModel(button, href, height, label) {
+              deactivateButtons();
+              sketchVM.pointSymbol = {
+                type: "point-3d",
+                symbolLayers: [
+                  {
+                    type: "object",
+                    height: height,
+                    resource: {
+                      href: href
+                    }
+                  }
+                ]
+              };
+              sketchVM.create("point");
+              button.classList.add("esri-button--secondary");
+              button.setAttribute("aria-pressed", "true");
+              setStatus(
+                "Cliquez dans la scène pour placer « " +
+                  label +
+                  " » (Échap pour annuler)."
+              );
+            }
+
+            rocketBtn.addEventListener("click", function() {
+              activateModel(rocketBtn, ROCKET_MODEL, 10, "Fusée");
+            });
+
+            canoeBtn.addEventListener("click", function() {
+              activateModel(canoeBtn, CANOE_MODEL, 1, "Canoë");
+            });
+
+            clearBtn.addEventListener("click", function() {
+              sketchVM.cancel();
+              graphicsLayer.removeAll();
+              deactivateButtons();
+              setStatus("Scène effacée.");
+            });
+
+            sketchVM.on("create", function(event) {
+              if (event.state === "complete") {
+                sketchVM.update(event.graphic);
+                deactivateButtons();
+                setStatus(
+                  "Modèle placé. Choisissez un modèle pour en ajouter un autre."
+                );
+              } else if (event.state === "cancel") {
+                deactivateButtons();
+                setStatus("");
+              }
+            });
+
+            checkModel(rocketBtn, ROCKET_MODEL, "Fusée");
+            checkModel(canoeBtn, CANOE_MODEL, "Canoë");
+          })
+          .catch(function(error) {
+            console.error(error);
+            loadingDiv.classList.add("loading--error");
+            loadingDiv.textContent =
+              "Impossible d'afficher la scène 3D. Votre navigateur ou votre carte graphique ne supporte peut-être pas WebGL.";
+          });
+
+        // Filet de sécurité : si la scène n'est jamais prête (réseau coupé,
+        // CDN inaccessible), l'écran d'attente laisse place à un message.
+        setTimeout(function() {
+          if (
+            !loadingDiv.classList.contains("is-hidden") &&
+            !loadingDiv.classList.contains("loading--error")
+          ) {
+            loadingDiv.classList.add("loading--error");
+            loadingDiv.textContent =
+              "La scène 3D met un temps inhabituel à se charger. Vérifiez votre connexion, puis rechargez la page.";
+          }
+        }, 30000);
 
         view.ui.add("paneDiv", "top-right");
       });
@@ -144,22 +257,57 @@
 
   <body>
     <div id="viewDiv"></div>
-    <div id="paneDiv" class="esri-widget">
-      <p>Select a symbol and place it in the scene:</p>
-      <button id="tent" class="esri-button">Tent</button><br />
-      <button id="canoe" class="esri-button">Canoe</button>
+    <div
+      id="paneDiv"
+      class="esri-widget"
+      role="group"
+      aria-label="Sélection du modèle 3D à placer"
+    >
+      <p>Choisissez un modèle 3D et placez-le dans la scène&nbsp;:</p>
+      <button id="rocket" type="button" class="esri-button" aria-pressed="false">
+        Fusée
+      </button
+      ><br />
+      <button id="canoe" type="button" class="esri-button" aria-pressed="false">
+        Canoë
+      </button
+      ><br />
+      <button id="clear" type="button" class="esri-button esri-button--tertiary">
+        Effacer
+      </button>
+      <p id="status" role="status" aria-live="polite"></p>
       <p id="credits">
-        Tent and canoe glTF models from
-        <a href="https://www.kenney.nl/assets/" target="_blank"
-          >Kenney game assets</a
+        Fusée «&nbsp;Cohete de Tin Tin&nbsp;» par
+        <a
+          href="https://sketchfab.com/CamiloFlores"
+          target="_blank"
+          rel="noopener noreferrer"
+          >CamiloFlores</a
         >
-        under
+        (Sketchfab), sous
+        <a
+          href="https://creativecommons.org/licenses/by/4.0/"
+          target="_blank"
+          rel="noopener noreferrer"
+          >CC BY 4.0</a
+        >. Canoë des
+        <a
+          href="https://www.kenney.nl/assets/"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Kenney game assets</a
+        >, sous
         <a
           href="https://creativecommons.org/publicdomain/zero/1.0/"
           target="_blank"
-          >CC0 1.0 Universal</a
-        >.
+          rel="noopener noreferrer"
+          >CC0 1.0</a
+        >. Scène 3D&nbsp;: échantillon Esri «&nbsp;Import glTF sample&nbsp;»
+        (Alaska).
       </p>
+    </div>
+    <div id="loading" role="status" aria-live="polite">
+      Chargement de la scène 3D…
     </div>
   </body>
 </html>
