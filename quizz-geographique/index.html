@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Quiz Géographique – Pays du monde</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css">
@@ -29,10 +29,12 @@
     }
 
     #titleDiv {
-      width: 100%; padding: 7px 16px;
+      width: 100%; margin: 0; padding: 7px 16px;
       font-size: 15px; font-weight: bold;
       text-align: center; color: white;
       background-color: #007AC2; box-sizing: border-box;
+      /* pointer-events reste hérité (none) : les clics traversent la bannière
+         jusqu'à la carte, sinon les pays situés sous elle seraient injouables */
     }
 
     #questionDiv {
@@ -43,6 +45,13 @@
     }
 
     #questionLabel { font-size: 13px; opacity: 0.8; margin-bottom: 4px; }
+    /* Bouton de réessai, affiché uniquement si les données pays sont indisponibles */
+    #retryBtn {
+      display: none; margin-top: 10px; padding: 7px 16px;
+      background: white; color: #007AC2; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: bold; cursor: pointer;
+      pointer-events: auto;  /* le panneau parent est en pointer-events:none */
+    }
     #questionText  { font-size: 24px; font-weight: bold; display: block; }
     #questionNum   { font-size: 12px; opacity: 0.75; margin-top: 4px; }
 
@@ -66,6 +75,7 @@
       border-radius: 20px; color: white;
       font-size: 16px; font-weight: bold;
       z-index: 10; pointer-events: none; white-space: nowrap;
+      display: none;  /* affiché au démarrage de la partie */
     }
 
     #feedbackDiv {
@@ -75,6 +85,7 @@
       font-size: 22px; font-weight: bold; color: white;
       z-index: 30; text-align: center; display: none;
       pointer-events: none;
+      box-sizing: border-box; width: max-content; max-width: calc(100vw - 24px);
       box-shadow: 0 4px 16px rgba(0,0,0,0.35);
       animation: popIn 0.2s ease;
     }
@@ -84,13 +95,18 @@
     }
     #feedbackDiv.correct { background: rgba(39,174,96,0.95); }
     #feedbackDiv.wrong   { background: rgba(192,57,43,0.95); }
+    /* Clic hors de tout pays : message neutre, ce n'est pas une faute */
+    #feedbackDiv.neutral { background: rgba(0,0,0,0.8); font-size: 17px; }
 
     #hintDiv {
       position: absolute; bottom: 65px; left: 50%;
       transform: translateX(-50%);
       padding: 6px 16px; background: rgba(255,255,255,0.82);
       border-radius: 16px; font-size: 13px; color: #333;
-      z-index: 10; pointer-events: none; white-space: nowrap;
+      z-index: 10; pointer-events: none; text-align: center;
+      /* l'indice de continent allonge le texte : il doit rester dans l'écran
+         sans recouvrir les boutons Zoom / Home, en bas à gauche */
+      box-sizing: border-box; width: max-content; max-width: calc(100vw - 100px);
     }
 
     /* ── Écran de fin ─────────────────────────────── */
@@ -101,7 +117,9 @@
       border-radius: 14px;
       box-shadow: 0 8px 32px rgba(0,0,0,0.45);
       text-align: center; z-index: 40; display: none;
-      width: 360px; max-height: 88vh; overflow-y: auto;
+      box-sizing: border-box;
+      width: min(360px, calc(100vw - 24px));
+      max-height: 88vh; overflow-y: auto;
     }
 
     #gameOverDiv h2 { margin: 0 0 2px 0; color: #007AC2; font-size: 22px; }
@@ -178,12 +196,14 @@
       try { localStorage.setItem(LS_KEY, JSON.stringify(db)); } catch(e) {}
     }
 
-    // Appelé quand un pays est affiché comme question
+    // Appelé quand un pays est affiché comme question.
+    // Retourne la fiche du pays pour éviter un second dbLoad à l'affichage.
     function dbCountryShown(name) {
       var db = dbLoad();
       if (!db.countries[name]) db.countries[name] = { shown: 0, found: 0 };
       db.countries[name].shown++;
       dbSave(db);
+      return db.countries[name];
     }
 
     // Appelé quand la réponse est correcte
@@ -203,10 +223,6 @@
       return db;
     }
 
-    function dbGetCountryStat(name) {
-      return (dbLoad().countries[name]) || null;
-    }
-
     // ══════════════════════════════════════════════════
     require([
       "esri/Map", "esri/views/MapView",
@@ -215,35 +231,100 @@
 
       var TOTAL  = 20;
       var FEEDBACK_MS = 1800;
+      var NEUTRAL_MS  = 900;
+      // Emprise (largeur × hauteur en degrés) en dessous de laquelle on donne
+      // l'indice du continent : ces pays font 1 à 2 px au cadrage mondial
+      var SMALL_AREA_DEG2 = 4;
+
+      // Données pays. Source principale : copie locale allégée de Natural Earth
+      // 110m (mêmes géométries, seuls NAME_FR / TYPE / CONTINENT conservés,
+      // coordonnées arrondies à 3 décimales — 200 Ko au lieu de 838 Ko).
+      // Repli sur le dépôt d'origine si le fichier local est indisponible.
+      var SOURCES = [
+        "countries-110m-fr.geojson",
+        "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson"
+      ];
+
+      // Entités non souveraines écartées du tirage — le titre annonce
+      // « Pays du monde ». Elles restent dessinées et cliquables sur la carte.
+      // (noms comparés en minuscules : la casse varie dans la source amont)
+      var EXCLUDED_TYPES = { "Indeterminate": true, "Dependency": true };
+      var EXCLUDED_NAMES = { "îles malouines": true, "kosovo": true, "chypre du nord": true };
+
+      var CONTINENTS_FR = {
+        "Africa": "Afrique", "Asia": "Asie", "Europe": "Europe",
+        "North America": "Amérique du Nord", "South America": "Amérique du Sud",
+        "Oceania": "Océanie", "Antarctica": "Antarctique"
+      };
 
       var country_table = [];
       var pts = 0, question = 0, randValue = 0, prevRandValue = -1;
       var clickLocked = true;
 
       // ── Carte ──────────────────────────────────────
+      // Emprise de départ = le monde entier. Avec un zoom fixe (3), un écran
+      // étroit ne montrait qu'un cinquième de la planète : la moitié des pays
+      // tirés étaient hors écran au début de chaque question.
+      var WORLD_EXTENT = {
+        xmin: -180, ymin: -60, xmax: 180, ymax: 78,
+        spatialReference: { wkid: 4326 }
+      };
+
       var map  = new Map({ basemap: "satellite" });
       var view = new MapView({
-        container: "viewDiv", map: map, zoom: 3,
-        constraints: { maxZoom: 14, minZoom: 2 }
+        container: "viewDiv", map: map,
+        extent: WORLD_EXTENT,
+        // Au cadrage mondial sur écran étroit, il reste du vide au-dessus et en
+        // dessous de la carte : teinté, il ne peut pas être pris pour un bug
+        background: { color: [10, 38, 58, 1] },
+        // minZoom bas + zoom continu : indispensable pour que les 360° tiennent
+        // sur un écran étroit (le monde entier fait moins d'un niveau de zoom)
+        constraints: { maxZoom: 14, minZoom: 0, snapToZoom: false }
       });
 
-      var layer = new GeoJSONLayer({
-        url: "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson",
-        copyright: "Natural Earth",
-        popupEnabled: false,
-        outFields: ["NAME_FR"],
-        renderer: {
-          type: "simple",
-          symbol: { type: "simple-fill", color: [0,0,0,0],
-            outline: { color: [255,255,255,0.6], width: 1 } }
-        }
+      // Le widget Zoom (haut-gauche par défaut) était masqué par la bannière de
+      // titre : on le regroupe avec le bouton Home en bas à gauche.
+      view.ui.move("zoom", "bottom-left");
+      var homeWidget = new Home({ view: view });
+      view.ui.add(homeWidget, "bottom-left");
+
+      // Emprise mondiale de départ, restaurée à chaque nouvelle question.
+      // Le bouton Home reçoit le même viewpoint : les deux restent cohérents.
+      var homeViewpoint = null;
+      view.when(function() {
+        homeViewpoint = view.viewpoint.clone();
+        homeWidget.viewpoint = homeViewpoint;
       });
 
-      map.add(layer);
-      view.ui.add(new Home({ view: view }), "bottom-left");
+      var layer = null;
+
+      function createLayer(url) {
+        return new GeoJSONLayer({
+          url: url,
+          copyright: "Natural Earth",
+          popupEnabled: false,
+          outFields: ["NAME_FR", "TYPE", "CONTINENT"],
+          renderer: {
+            type: "simple",
+            symbol: { type: "simple-fill", color: [0,0,0,0],
+              outline: { color: [255,255,255,0.6], width: 1 } }
+          }
+        });
+      }
+
+      // goTo() rejette dès qu'une animation en interrompt une autre : ce cas-là
+      // est normal et silencieux, toute autre erreur reste visible en console.
+      function ignore(err) {
+        if (err && err.name !== "view:goto-interrupted") console.warn(err);
+      }
+
+      // Les géométries GeoJSON sont en WGS84 : largeurs et hauteurs en degrés
+      function isDegrees(sr) { return !(sr && sr.isWebMercator); }
 
       // ── Refs UI ────────────────────────────────────
       var $ = function(id) { return document.getElementById(id); };
+      var questionLabelEl  = $("questionLabel");
+      var retryBtn         = $("retryBtn");
       var questionTextEl   = $("questionText");
       var questionNumEl    = $("questionNum");
       var countryStatDiv   = $("countryStatDiv");
@@ -261,25 +342,75 @@
       var hardCountriesEl  = $("hardCountriesEl");
 
       // ── Chargement ─────────────────────────────────
-      layer.load().then(function() {
-        return layer.queryFeatures({
-          where: "NAME_FR IS NOT NULL",
-          outFields: ["NAME_FR"],
-          returnGeometry: false, num: 300
-        });
-      }).then(function(result) {
-        var seen = {};
-        country_table = result.features
-          .map(function(f) { return f.attributes.NAME_FR; })
-          .filter(function(n) {
-            if (!n || seen[n]) return false;
-            seen[n] = true; return true;
+      // Essaie les sources l'une après l'autre ; si aucune ne répond,
+      // l'interface le dit clairement et propose de réessayer.
+      function loadCountries(index) {
+        if (index >= SOURCES.length) { showLoadError(); return; }
+        if (layer) map.remove(layer);
+        layer = createLayer(SOURCES[index]);
+        map.add(layer);
+
+        layer.load().then(function() {
+          return layer.queryFeatures({
+            where: "NAME_FR IS NOT NULL",
+            outFields: ["NAME_FR", "TYPE", "CONTINENT"],
+            returnGeometry: true
           });
-        startGame();
-      }).catch(function(err) {
-        questionTextEl.innerHTML = "Erreur de chargement";
-        console.error(err);
+        }).then(function(result) {
+          var pool = buildPool(result.features);
+          if (!pool.length) throw new Error("Aucun pays exploitable dans la source");
+          country_table = pool;
+        }).catch(function(err) {
+          console.error(err);
+          country_table = [];
+          loadCountries(index + 1);
+        }).then(function() {
+          // startGame() est appelé HORS de la chaîne surveillée par le catch :
+          // une exception du jeu ne doit pas être prise pour une source morte
+          if (country_table.length) startGame();
+        });
+      }
+
+      // Pool de questions : pays souverains uniquement, avec leur continent et
+      // leur taille (pour l'indice donné sur les pays minuscules).
+      function buildPool(features) {
+        var seen = {};
+        return features.filter(function(f) {
+          var a = f.attributes;
+          if (!a.NAME_FR || seen[a.NAME_FR]) return false;
+          if (EXCLUDED_TYPES[a.TYPE] || EXCLUDED_NAMES[String(a.NAME_FR).toLowerCase()]) return false;
+          seen[a.NAME_FR] = true;
+          return true;
+        }).map(function(f) {
+          var e    = f.geometry && f.geometry.extent;
+          var area = (e && isDegrees(e.spatialReference)) ? e.width * e.height : null;
+          return {
+            name: f.attributes.NAME_FR,
+            continent: CONTINENTS_FR[f.attributes.CONTINENT] || null,
+            small: area !== null && area < SMALL_AREA_DEG2
+          };
+        });
+      }
+
+      function showLoadError() {
+        questionLabelEl.style.display = "none";
+        countryStatDiv.style.display  = "none";
+        hintEl.style.display          = "none";
+        scoreEl.style.display         = "none";
+        questionTextEl.textContent    = "Données indisponibles";
+        questionNumEl.textContent     = "Impossible de charger les pays. Vérifiez votre connexion.";
+        retryBtn.style.display        = "inline-block";
+      }
+
+      retryBtn.addEventListener("click", function() {
+        retryBtn.style.display        = "none";
+        questionLabelEl.style.display = "block";
+        questionNumEl.textContent     = "";
+        questionTextEl.textContent    = "Chargement…";
+        loadCountries(0);
       });
+
+      loadCountries(0);
 
       // ── Jeu ────────────────────────────────────────
 
@@ -288,7 +419,8 @@
         clickLocked = false;
         view.graphics.removeAll();
         gameOverEl.style.display = "none";
-        progressEl.style.width = "0%";
+        scoreEl.style.display    = "block";
+        progressEl.style.width   = "0%";
         nextQuestion();
       }
 
@@ -296,28 +428,34 @@
         question++;
         if (question > TOTAL) { endGame(); return; }
         view.graphics.removeAll();
+        goHome();   // sans ce recadrage, la question suivante se jouerait
+                    // sur le zoom hérité de la réponse précédente
         do {
           randValue = Math.floor(Math.random() * country_table.length);
         } while (randValue === prevRandValue && country_table.length > 1);
         prevRandValue = randValue;
 
-        var name = country_table[randValue];
-        questionTextEl.innerHTML = name;
-        questionNumEl.innerHTML  = "Question " + question + " / " + TOTAL;
-        scoreEl.innerHTML        = "Score : " + pts + " / " + (question - 1);
-        progressEl.style.width   = ((question - 1) / TOTAL * 100) + "%";
-        hintEl.style.display     = "block";
+        var target = country_table[randValue];
+        questionTextEl.textContent = target.name;
+        questionNumEl.textContent  = "Question " + question + " / " + TOTAL;
+        scoreEl.textContent        = "Score : " + pts + " / " + (question - 1);
+        progressEl.style.width     = ((question - 1) / TOTAL * 100) + "%";
+        // Indice de continent pour les pays invisibles au cadrage mondial
+        hintEl.textContent = "👆 Cliquez sur le pays indiqué"
+          + (target.small && target.continent ? " — indice : " + target.continent : "");
+        hintEl.style.display = "block";
         clickLocked = false;
 
-        // Enregistrer que le pays a été affiché
-        dbCountryShown(name);
-
-        // Afficher le taux de réussite perso sur ce pays
-        showCountryStat(name);
+        // Enregistrer l'affichage, puis montrer le taux de réussite perso
+        showCountryStat(dbCountryShown(target.name));
       }
 
-      function showCountryStat(name) {
-        var stat = dbGetCountryStat(name);
+      // Retour à l'emprise mondiale initiale (identique au bouton Home)
+      function goHome() {
+        if (homeViewpoint) view.goTo(homeViewpoint, { duration: 500 }).catch(ignore);
+      }
+
+      function showCountryStat(stat) {
         // shown a déjà été incrémenté, donc on regarde l'historique avant cette question
         var historique = stat ? stat.shown - 1 : 0;
         if (!stat || historique < 1) {
@@ -338,7 +476,7 @@
         hintEl.style.display = "none";
         view.graphics.removeAll();
         progressEl.style.width = "100%";
-        scoreEl.innerHTML = "Partie terminée !";
+        scoreEl.textContent = "Partie terminée !";
 
         var pct   = Math.round(pts / TOTAL * 100);
         var grade = pct === 100 ? "Parfait ! Expert absolu ! 🌍"
@@ -347,15 +485,16 @@
                   : pct >= 40  ? "Pas mal, continuez !"
                   :              "Entraînez-vous encore !";
 
-        finalScoreEl.innerHTML = pts + " / " + TOTAL;
-        gradeEl.innerHTML = grade;
+        finalScoreEl.textContent = pts + " / " + TOTAL;
+        gradeEl.textContent = grade;
         gameOverEl.style.display = "block";
 
         var db = dbSaveScore(pts, TOTAL);
-        renderEndStats(db);
+        // L'horodatage identifie la partie qui vient de se terminer dans le top 10
+        renderEndStats(db, db.scores[db.scores.length - 1].date);
       }
 
-      function renderEndStats(db) {
+      function renderEndStats(db, currentDate) {
         var scores = db.scores;
         var n = scores.length;
 
@@ -395,7 +534,7 @@
         var html = "";
         sorted.forEach(function(e, i) {
           var medals = ["🥇","🥈","🥉"];
-          var isThis = e.score === pts && i === sorted.findIndex(function(x){return x.score===pts;});
+          var isThis = e.date === currentDate;
           html += '<tr class="' + (isThis ? "my-row" : "") + '">'
             + '<td>' + (medals[i] || (i+1)) + '</td>'
             + '<td style="text-align:right;font-weight:bold">' + e.score + '/' + TOTAL + '</td>'
@@ -456,12 +595,15 @@
           returnGeometry: true,
           outFields: ["NAME_FR"]
         }).then(function(response) {
-          if (!response.features.length) { clickLocked = false; return; }
+          // Clic dans l'océan ou hors de toute entité : on le signale
+          // explicitement, sans le compter comme une mauvaise réponse
+          if (!response.features.length) { showNeutral("Ce n'est pas un pays, réessayez"); return; }
 
+          var target      = country_table[randValue];
           var clickedName = response.features[0].attributes.NAME_FR;
-          var correct = clickedName === country_table[randValue];
+          var correct     = clickedName === target.name;
 
-          if (correct) dbCountryFound(country_table[randValue]);
+          if (correct) dbCountryFound(target.name);
 
           var f = response.features[0].clone();
           f.symbol = {
@@ -470,19 +612,53 @@
             outline: { color: correct ? "#27AE60" : "#C0392B", width: "3px" }
           };
           view.graphics.add(f);
-          view.goTo(f.geometry.extent.expand(2.5), { duration: 600 });
+          goToFeature(f.geometry);
 
           if (correct) {
             pts++;
             showFeedback(true, null);
           } else {
-            highlightCorrect(function() { showFeedback(false, country_table[randValue]); });
+            highlightCorrect(function() { showFeedback(false, target.name); });
           }
         }).catch(function() { clickLocked = false; });
       });
 
+      // Recadre sur une entité sans jamais sortir des limites du Web Mercator.
+      // Au-delà de ±85° de latitude le fond de carte ne peut plus être rendu
+      // (écran blanc), et l'emprise d'un pays traversant l'antiméridien fait
+      // 360° de large, ce qui donne un zoom absurde.
+      function goToFeature(geom) {
+        var ext = geom && geom.extent;
+        if (!ext) return;
+        var deg    = isDegrees(ext.spatialReference);
+        // On s'arrête un peu avant la limite du Web Mercator (85,05°) : l'ajustement
+        // d'aspect du goTo ne déborde alors pas au-dessus du pôle, où il n'existe
+        // aucune imagerie (bande blanche en haut de vue). La terre ferme la plus
+        // septentrionale est à 83,7° : rien de visible n'est perdu.
+        var latMax = deg ? 84  : 18808700;   // 84° ou son équivalent en mètres
+        var worldW = deg ? 360 : 40075016;
+        var big    = deg ? 25  : 2800000;    // au-delà, le pays remplit déjà l'écran
+        var center = geom.centroid || ext.center;
+
+        // Emprise traversant l'antiméridien : inexploitable, on se recentre
+        if (ext.width >= worldW / 2) {
+          view.goTo({ target: center, zoom: 3 }, { duration: 600 }).catch(ignore);
+          return;
+        }
+        // Élargissement adaptatif : inutile pour les pays déjà très étendus
+        var span = Math.max(ext.width, ext.height);
+        var box  = ext.clone().expand(span > big ? 1.2 : 2.5);
+        box.ymax = Math.min(box.ymax, latMax);
+        box.ymin = Math.max(box.ymin, -latMax);
+        if (box.ymax <= box.ymin || box.xmax <= box.xmin) {
+          view.goTo({ target: center, zoom: 3 }, { duration: 600 }).catch(ignore);
+          return;
+        }
+        view.goTo(box, { duration: 600 }).catch(ignore);
+      }
+
       function highlightCorrect(callback) {
-        var safe = country_table[randValue].replace(/'/g, "''");
+        var safe = country_table[randValue].name.replace(/'/g, "''");
         layer.queryFeatures({
           where: "NAME_FR = '" + safe + "'",
           outFields: ["NAME_FR"], returnGeometry: true
@@ -494,7 +670,7 @@
               outline: { color: "#27AE60", width: "3px" }
             };
             view.graphics.add(f);
-            view.goTo(f.geometry.extent.expand(2.5), { duration: 600 });
+            goToFeature(f.geometry);
           }
           callback();
         }).catch(callback);
@@ -504,13 +680,27 @@
         feedbackEl.className = correct ? "correct" : "wrong";
         feedbackEl.innerHTML = correct
           ? "✓ Bonne réponse !"
-          : "✗ C'était : <em>" + correctName + "</em>";
+          : "✗ C'était : <em>" + escHtml(correctName) + "</em>";
         feedbackEl.style.display = "block";
         hintEl.style.display = "none";
         setTimeout(function() {
           feedbackEl.style.display = "none";
           nextQuestion();
         }, FEEDBACK_MS);
+      }
+
+      // Retour neutre : ni bonne ni mauvaise réponse, la question reste posée
+      function showNeutral(msg) {
+        feedbackEl.className   = "neutral";
+        feedbackEl.textContent = msg;
+        feedbackEl.style.display = "block";
+        // Déverrouillage immédiat : rater sa cible ne doit pas faire attendre.
+        // Le minuteur ne sert qu'à effacer le message, et seulement s'il est
+        // toujours affiché (un vrai feedback entre-temps a la priorité).
+        clickLocked = false;
+        setTimeout(function() {
+          if (feedbackEl.className === "neutral") feedbackEl.style.display = "none";
+        }, NEUTRAL_MS);
       }
 
       $("restartBtn").addEventListener("click", startGame);
@@ -522,18 +712,19 @@
   <div id="viewDiv"></div>
 
   <div id="questionPanel">
-    <div id="titleDiv">🌍 Quiz Géographique – Pays du monde</div>
-    <div id="questionDiv">
+    <h1 id="titleDiv">🌍 Quiz Géographique – Pays du monde</h1>
+    <div id="questionDiv" aria-live="polite">
       <div id="questionLabel">Cliquez sur le pays :</div>
       <span id="questionText">Chargement…</span>
       <div id="questionNum"></div>
       <div id="countryStatDiv"></div>
+      <button id="retryBtn" type="button">↻ Réessayer</button>
     </div>
   </div>
 
-  <div id="scoreDiv">Score : 0 / 0</div>
+  <div id="scoreDiv" role="status">Score : 0 / 0</div>
   <div id="hintDiv">👆 Cliquez sur le pays indiqué</div>
-  <div id="feedbackDiv"></div>
+  <div id="feedbackDiv" aria-live="assertive"></div>
 
   <!-- ── Écran de fin ────────────────────────────── -->
   <div id="gameOverDiv">
