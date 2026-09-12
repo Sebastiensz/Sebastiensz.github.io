@@ -9,6 +9,10 @@ body,
   background: rgb(5, 50, 56);
 }
 
+[hidden] {
+  display: none !important;
+}
+
 footer {
   position: absolute;
   left: 0;
@@ -26,6 +30,45 @@ footer {
   margin:10px auto;
 }
 
+/* bornes du filtre, affichées sous le curseur */
+#sliderValues {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 80%;
+  margin: 0 auto 10px;
+  font-size: 0.9em;
+}
+
+/* retour au cadrage initial : posé entre les deux bornes, sans hauteur supplémentaire */
+#resetView {
+  flex: none;
+  padding: 0;
+  color: white;
+  font: inherit;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  border-bottom: 1px dashed white;
+  cursor: pointer;
+}
+
+#resetView:focus-visible {
+  outline: 2px solid rgba(0, 233, 255, 0.8);
+  outline-offset: 2px;
+}
+
+/* message de chargement / d'erreur */
+#status {
+  margin: 0 0 10px;
+  font-size: 0.9em;
+}
+
+#status.error {
+  color: #FFB4A2;
+}
+
 footer>p {
   margin-bottom: 30px;
 }
@@ -34,13 +77,71 @@ footer>p {
   font-size: 0.8em;
 }
 
+/* pied de page compact sur petit écran : il occupait plus de la moitié de la hauteur */
+@media (max-width: 640px) {
+  footer {
+    width: 90%;
+  }
+
+  footer h1 {
+    font-size: 1.5em;
+    margin: 8px 0;
+  }
+
+  footer>p {
+    font-size: 0.85em;
+    margin-bottom: 12px;
+  }
+
+  #populationSlider {
+    margin: 8px auto;
+  }
+
+  #sliderValues {
+    margin-bottom: 8px;
+    font-size: 0.8em;
+  }
+
+  .credits {
+    font-size: 0.7em;
+  }
+}
+
+/* écran bas (téléphone en paysage, fenêtre desktop peu haute) : le pied de page
+   recouvrait jusqu'à 76 % de la hauteur et ne laissait plus de place au globe */
+@media (max-height: 560px) {
+  footer h1 {
+    font-size: 1.2em;
+    margin: 4px 0;
+  }
+
+  footer>p {
+    font-size: 0.85em;
+    margin-bottom: 8px;
+  }
+
+  #status {
+    margin-bottom: 6px;
+  }
+
+  #populationSlider {
+    margin: 6px auto;
+  }
+
+  #sliderValues {
+    margin-bottom: 6px;
+    font-size: 0.8em;
+  }
+
+  .credits {
+    font-size: 0.7em;
+  }
+}
+
 a {
   color: white;
   text-decoration: none;
   border-bottom: 1px dashed white;
-}
-.noUi-horizontal {
-  width: 5px;
 }
 
 .noUi-connect {
@@ -62,24 +163,28 @@ a {
   top: -4px;
 }
 
+/* poignées plus grandes au doigt (cible tactile) */
+@media (pointer: coarse) {
+  .noUi-horizontal .noUi-handle {
+    width: 28px;
+    height: 28px;
+    left: -14px;
+    top: -9px;
+  }
+}
+
 .noUi-connect:hover, .noUi-handle {
   cursor: pointer;
 }
 
+/* focus clavier visible */
 .noUi-handle:focus {
   outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 233, 255, 0.6);
 }
 
 .noUi-marker-horizontal.noUi-marker {
   height: 1px;
-}
-
-.noUi-tooltip {
-  font-size: 0.9em;
-  border: none;
-  padding: 1px;
-  background: transparent;
-  color: white;
 }
 
 .noUi-handle:after, .noUi-handle:before {

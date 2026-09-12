@@ -1,15 +1,21 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Population mondiale 2020 en 3D : grille d'environ 110 km, filtrable par nombre de personnes par cellule.">
   <title>Population mondiale 2020</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23053238'/%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%2300E9FF' stroke-width='2'/%3E%3Cellipse cx='16' cy='16' rx='5.5' ry='11' fill='none' stroke='%2300E9FF' stroke-width='1.5'/%3E%3Cpath d='M5.2 16h21.6M7.5 9.5h17M7.5 22.5h17' stroke='%2300E9FF' stroke-width='1.2'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css?family=Open+Sans+Condensed:300&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://js.arcgis.com/4.19/esri/css/main.css">
   <link rel="stylesheet" href="css/nouislider.min.css">
   <link rel="stylesheet" href="css/main.css">
   <script>
-    var locationPath = location.pathname.replace(/\/[^\/]+$/, '');
+    // Ne retire que le nom de fichier éventuel (index.html) : le slash final est conservé
+    var locationPath = location.pathname.replace(/[^\/]*$/, '');
     window.dojoConfig = {
       packages: [{
         name: 'nouislider',
@@ -22,24 +28,59 @@
       }]
     };
 
+    // Si le CDN ArcGIS est injoignable, main.js ne s'exécute jamais : la page resterait
+    // indéfiniment sur « Chargement du globe… ». On affiche alors un message explicite.
+    function signalApiFailure() {
+      // main.js repose sur require() : on le neutralise pour ne pas empiler une erreur de script
+      if (typeof window.require === 'undefined') {
+        window.require = function () { };
+      }
+      var show = function () {
+        var status = document.getElementById('status');
+        if (!status || status.classList.contains('error')) {
+          return;
+        }
+        status.textContent = "Impossible de charger la bibliothèque cartographique ArcGIS (réseau indisponible). Rechargez la page.";
+        status.classList.add('error');
+        status.hidden = false;
+      };
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', show);
+      } else {
+        show();
+      }
+    }
+    // filet de sécurité : le script peut aussi rester bloqué sans déclencher onerror
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        if (typeof window.require === 'undefined') {
+          signalApiFailure();
+        }
+      }, 15000);
+    });
+
   </script>
-  <script src="https://js.arcgis.com/4.19/"></script>
-  <link href="https://fonts.googleapis.com/css?family=Open+Sans+Condensed:300" rel="stylesheet">
-  <script src="app/main.js"></script>
+  <script src="https://js.arcgis.com/4.19/" onerror="signalApiFailure()"></script>
+  <script src="app/main.js" defer></script>
 </head>
 
 <body>
-  <div id="viewDiv"></div>
+  <main id="viewDiv" aria-label="Globe 3D de la population mondiale en 2020 : chaque cube représente une cellule de grille d'environ 110 km, sa hauteur traduit le nombre d'habitants."></main>
   <footer>
     <h1>Population mondiale en 2020</h1>
-    <p>Estimation du dénombrement de la population mondiale pour 2020 sous forme de grille. La grille a une résolution d'environ 110 km.
-      Utilisez le curseur pour filtrer les cellules en fonction du nombre de personnes par unité de grille.
+    <p>Estimation du dénombrement de la population mondiale pour 2020 sous forme de grille d'environ 110 km de résolution.
+      La hauteur de chaque cube traduit le nombre d'habitants de la cellule.
+      Utilisez le curseur pour filtrer les cellules selon le nombre de personnes par cellule.
+      Seules les cellules de plus de 10 personnes sont affichées<span id="cellCount" aria-live="polite"></span>.
     </p>
+    <p id="status" role="status" aria-live="polite">Chargement du globe…</p>
     <div id="populationSlider"></div>
+    <div id="sliderValues"><output id="sliderMin"></output><button type="button" id="resetView" title="Revenir au cadrage initial du globe" hidden>Recadrer</button><output id="sliderMax"></output></div>
     <span class="credits">Données raster de population d'origine de
-      <a href="http://sedac.ciesin.columbia.edu/data/set/gpw-v4-population-count-rev10/data-download" target="_blank">SEDAC</a>.
-      Ce prototype a été réalisé <a href="https://developers.arcgis.com/javascript/" target="_blank">ArcGIS API for JavaScript</a>.
-      Le code de cette application : <a href="https://github.com/Sebastiensz/arcgis-javascript/tree/master/world-population-2020" target="_blank">Github</a>.
+      <a href="https://www.earthdata.nasa.gov/data/projects/gpw" target="_blank" rel="noopener noreferrer">SEDAC (GPW v4, CIESIN / NASA)</a>.
+      Frontières et graticule : Esri, Garmin, CIA World Factbook, National Geographic.
+      Ce prototype a été réalisé avec l'<a href="https://developers.arcgis.com/javascript/" target="_blank" rel="noopener noreferrer">ArcGIS API for JavaScript</a>.
+      Le code de cette application : <a href="https://github.com/Sebastiensz/arcgis-portfolio/tree/master/world-population-2020" target="_blank" rel="noopener noreferrer">Github</a>.
     </span>
   </footer>
 </body>
