@@ -70,4 +70,3 @@ define(["require", "exports", "esri/core/tsSupport/declareExtendsHelper", "esri/
     }(decorators_1.declared(Accessor)));
     return ShareFeatures;
 });
-//# sourceMappingURL=ShareFeatures.js.map

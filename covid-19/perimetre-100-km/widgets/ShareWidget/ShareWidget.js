@@ -472,4 +472,3 @@ define(["require", "exports", "esri/core/tsSupport/declareExtendsHelper", "esri/
     }(decorators_1.declared(Widget)));
     return Share;
 });
-//# sourceMappingURL=ShareWidget.js.map

@@ -1,16 +1,13 @@
-﻿<!DOCTYPE html>
-<!––Author : Sebastien Szollosi
+<!DOCTYPE html>
+<!--Author : Sebastien Szollosi
 Blog : codethemap.fr  https://www.codethemap.fr/
 Technology : ArcGIS API for JavaScript  https://developers.arcgis.com/javascript/
 Company : Esri France
-––>
+-->
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta
-        name="viewport"
-        content="initial-scale=1,maximum-scale=1,user-scalable=no"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Carte du déconfinement : le périmètre à 100 kilomètres</title>
 
     <style>
@@ -126,8 +123,9 @@ Company : Esri France
         }
 
         #about {
-            color: white;
             box-shadow: none;
+            border: none;
+            padding: 0;
             cursor: pointer;
         }
 
@@ -191,19 +189,56 @@ Company : Esri France
             height:50px;
         }
 
+        /* Largeur relative bornée : la marge de 75px réserve la place de la colonne de boutons
+           en haut à droite, qui recouvrait le bord des champs sur les écrans de 320px */
         .esri-search-widget-mobile {
-            width:306px !important;
+            width: calc(100vw - 75px) !important;
+            max-width: 306px;
             height:50px;
         }
-   
+
+        /* Message d'erreur visible dans la carte (service indisponible, clic hors de France...) */
+        #errorMsg {
+            /* z-index : sur un écran étroit le message croise l'encart logo du coin bas droit,
+               il doit passer au-dessus pour rester lisible en entier */
+            position: relative;
+            z-index: 2;
+            width: calc(100vw - 30px);
+            max-width: 320px;
+            padding: 10px 12px;
+            font-size: 13px;
+            line-height: 1.35em;
+            color: #323232;
+            background-color: #fff;
+            border-left: 4px solid #D83020;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Mention d'archive de l'écran d'introduction */
+        .archive-note {
+            margin-top: -0.8em;
+            font-size: 0.85em;
+            color: #6e6e6e;
+        }
+
+        /* Glyphes du widget Partager : la feuille calcite-web distante n'existe plus,
+           on redéfinit les deux icônes utilisées avec des caractères Unicode (aucune dépendance externe) */
+        .icon-ui-close::before {
+            content: "\2715";
+        }
+        .icon-ui-duplicate::before {
+            content: "\29C9";
+            font-size: 15px;
+            line-height: 1;
+        }
+
     </style>
     <link
         rel="stylesheet"
         href="https://js.arcgis.com/4.14/esri/themes/light/main.css"
     />
-	<link rel="stylesheet" href="https://s3-us-west-1.amazonaws.com/patterns.esri.com/files/calcite-web/1.2.5/css/calcite-web.min.css"/>
 	<link rel="stylesheet" href="./widgets/ShareWidget/css/Share.css"/>
-	<link rel=icon href=./favicon_32.ico>
+	<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='none' stroke='%23007AC2' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23007AC2'/%3E%3C/svg%3E">
 	<script>
         var locationPath = location.pathname.replace(/\/[^\/]+$/, "");
         window.dojoConfig = {
@@ -213,6 +248,9 @@ Company : Esri France
             }]
         };
     </script>
+    <!-- API ArcGIS for JavaScript épinglée en 4.14 (avril 2020). L'épinglage est volontaire :
+         l'application s'appuie sur des modules retirés des versions récentes (esri/tasks/Locator,
+         widget Share maison). Fonctionnement vérifié en septembre 2026. -->
     <script src="https://js.arcgis.com/4.14/"></script>
     <script>
       require([
@@ -232,16 +270,17 @@ Company : Esri France
         "esri/widgets/ScaleBar",
         "esri/Graphic",
         "esri/geometry/geometryEngine",
-        "esri/geometry/Circle",
-        "esri/core/watchUtils",
 		"esri/layers/FeatureLayer",
-        "esri/tasks/support/Query","esri/layers/GraphicsLayer", "widgets/ShareWidget/ShareWidget"
+        "esri/layers/GraphicsLayer", "widgets/ShareWidget/ShareWidget"
       ], function(Basemap, Map, MapView, Zoom, Home, Expand, Search, BasemapGallery, LocalBasemapsSource, Locator, LocatorSearchSource,
-        Locate, Print, ScaleBar, Graphic, GeometryEngine, Circle, watchUtils,FeatureLayer,Query,GraphicsLayer,ShareWidget) {
+        Locate, Print, ScaleBar, Graphic, GeometryEngine, FeatureLayer, GraphicsLayer, ShareWidget) {
 
         var center = null;
         var zoomLevel = null;
         var mode = "";
+        var paramWarning = null;
+        // Vrai dès qu'une clé 'center' ou 'level' est présente dans l'URL, valide ou non
+        var sharedLinkParam = false;
 
         // Décodage des paramètres de l'URL, s'il y en a (centrage et niveau de zoom)
         var positionParams = window.location.href.indexOf('?');
@@ -256,9 +295,15 @@ Company : Esri France
                 var value = paramKeyValue[1];
                 switch(key){
                     case "center":
-                        var coordinates = value.split(",");
-                        var x = coordinates[0];
-                        var y = coordinates[1];
+                        sharedLinkParam = true;
+                        // Validation : des coordonnées absentes ou hors plage donneraient une vue incohérente
+                        var coordinates = (value || "").split(",");
+                        var x = parseFloat(coordinates[0]);
+                        var y = parseFloat(coordinates[1]);
+                        if (isNaN(x) || isNaN(y) || x < -180 || x > 180 || y < -90 || y > 90){
+                            console.error("Invalid 'center' URL param '" + value + "'");
+                            break;
+                        }
                         center = {
                             type: "point", // autocasts as new Point()
                             longitude: x,
@@ -266,9 +311,18 @@ Company : Esri France
                         };
                         break;
                     case "level":
-                        zoomLevel = value;
+                        sharedLinkParam = true;
+                        // Borne haute alignée sur le LOD maximal des fonds Esri (23) : le widget Partager
+                        // peut écrire un niveau supérieur à 20 sur les fonds imagerie
+                        var level = parseInt(value, 10);
+                        if (isNaN(level) || level < 0 || level > 23){
+                            console.error("Invalid 'level' URL param '" + value + "'");
+                            break;
+                        }
+                        zoomLevel = level;
                         break;
                     default:
+                        // Paramètre étranger à l'application (suivi de campagne, ancre...) : sans effet, sans avertissement
                         console.error("Unknown URL param '" + key + "'");
                 }
             })
@@ -276,9 +330,12 @@ Company : Esri France
             if (center != null && zoomLevel != null){
                 mode = "param";
             }
-            else
+            else if (sharedLinkParam)
             {
+                // Seul un lien de partage réellement incomplet ou invalide est signalé :
+                // une URL ne portant que des paramètres étrangers (utm_source...) reste silencieuse
                 console.error("Problem with URL parameters");
+                paramWarning = "Le lien de partage est incomplet ou invalide, la carte s'ouvre sur la vue par défaut.";
             }
         }
 
@@ -287,7 +344,6 @@ Company : Esri France
         }
 
         var resultsLayer = new GraphicsLayer();
-		var resultsLayer2 = new GraphicsLayer();
 		var comLayer = new FeatureLayer({
             url: "https://services.arcgis.com/d3voDfTFbHOCRwVR/arcgis/rest/services/Communes_France_2020/FeatureServer/0",
             outFields :['CODEINSEE'],
@@ -307,6 +363,20 @@ Company : Esri France
     id: "4bd9b90a009347e4b3bf774136a737a2"
   },
             popupEnabled:false,
+            // Surcharge du rendu enregistré dans l'item de portail : c'est le zonage vert/rouge
+            // du déconfinement de mai 2020, périmé et affiché sans légende. On ne garde que les
+            // limites administratives, ce que promet le texte d'introduction.
+            renderer: {
+                type: "simple",
+                symbol: {
+                    type: "simple-fill",
+                    color: [0, 0, 0, 0],
+                    outline: {
+                        color: "rgba(110,110,110,0.55)",
+                        width: 0.7
+                    }
+                }
+            }
         });
 	
 
@@ -392,9 +462,8 @@ Company : Esri France
             basemap: basemapTopographie
         });
 	  
-        //map.add(comLayer, 0);
+        // comLayer n'est pas ajoutée à la carte : elle sert uniquement aux requêtes
         map.add(resultsLayer,0);
-		map.add(resultsLayer2,0);
 		map.add(deconfDpmt);
         var code_insee
 
@@ -408,6 +477,14 @@ Company : Esri France
             zoom: 5,
             center: [3, 47]
         });
+
+        // Zone de message utilisateur : service indisponible, clic hors de France, lien invalide
+        view.ui.add("errorMsg", {
+            position: "bottom-left",
+            index: 0
+        });
+        // L'avertissement n'est pas affiché tout de suite : l'écran d'intro, ouvert dans ce cas précis,
+        // recouvre la carte. Il est montré à sa fermeture, quand l'utilisateur voit réellement la carte.
 		
 		
 //previous place for the query
@@ -434,6 +511,11 @@ Company : Esri France
         function closeMenu() {
             document.getElementById("container").style.display = "none";
             view.container.style.filter = "blur(0px)";
+            // Lien de partage invalide : le message est montré une seule fois, une fois la carte visible
+            if (paramWarning != null){
+                showError(paramWarning);
+                paramWarning = null;
+            }
         }
 
         let intro = true;
@@ -479,10 +561,12 @@ Company : Esri France
             });
 
             printExpand.watch("expanded", function(value){
+                // Uniquement à l'ouverture, et seulement si le formulaire est déjà rendu
+                if (!value) return;
                 var select = document.querySelectorAll("[data-target-property='layout']")[0];
-                select.value = "a4-portrait";
+                if (select) select.value = "a4-portrait";
 				var select2 = document.querySelectorAll("[data-target-property='format']")[0];
-				select2.value="jpg";
+				if (select2) select2.value="jpg";
             });
 			
 			view.watch("scale", function(value){
@@ -490,14 +574,6 @@ Company : Esri France
                 // So to be sure to get same result than in the application, printed scale must be current scale truncated to integer
                 printWidget.templateOptions.scaleEnabled = true;
                 printWidget.templateOptions.scale = Math.trunc(view.scale);
-            });
-			
-            view.watch("stationary", function(isStationary){
-                // Si on touche à la carte, on force la fermeture du widget share pour forcer
-                // la génération d'un nouveau lien de partage mis à jour avec les nouvelles coordonnées
-                if (!isStationary && view.widthBreakpoint != "xsmall"){
-                    shareExpand.collapse();
-                }
             });
 			
 			// Widget Share
@@ -549,6 +625,12 @@ Company : Esri France
                 getIsoDistance(event.target.graphic.geometry)
             });
 
+            // Géolocalisation refusée ou indisponible : l'utilisateur doit savoir pourquoi rien ne se passe
+            locateWidget.on("locate-error", function(event){
+                console.error(event.error);
+                showError("La géolocalisation n'est pas disponible. Recherchez votre commune ou cliquez sur la carte.");
+            });
+
             var basemapGalleryWidget = new BasemapGallery({
                 activeBasemap: basemapTopographie,
                 view: view,
@@ -576,19 +658,6 @@ Company : Esri France
             popupEnabled: false, // popup is customized so default popup is disabled
             resultGraphicEnabled: false, // resultGraphic is customized so default resultGraphic is disabled
             sources : [locatorSearchSource]
-            // sources:[{
-            //     layer: chflLayer,
-            //     searchFields: ["NAME"],
-            //     displayField: "NAME",
-            //     exactMatch: false,
-            //     outFields: ["NAME","CODEINSEE"],
-            //     name: "Commune",
-            //     placeholder: "Recherchez votre commune",
-            //     maxResults: 3,
-            //     maxSuggestions: 15,
-            //     minSuggestCharacters:3
-            // }],
-			// locationEnabled:false
         });
 		
 		const searchWidget2 = new Search({
@@ -597,18 +666,6 @@ Company : Esri France
             popupEnabled: false, // popup is customized so default popup is disabled
             resultGraphicEnabled: false, // resultGraphic is customized so default resultGraphic is disabled
             sources : [locatorSearchSource2],
-            // sources:[{
-            //     layer: chflLayer,
-            //     searchFields: ["NAME"],
-            //     displayField: "NAME",
-            //     exactMatch: false,
-            //     outFields: ["NAME","CODEINSEE"],
-            //     name: "Commune",
-            //     placeholder: "Recherchez votre commune",
-            //     maxResults: 3,
-            //     maxSuggestions: 15,
-            //     minSuggestCharacters:3
-            // }],
 			locationEnabled:false
         });
 
@@ -679,9 +736,36 @@ Company : Esri France
             index: 1
         });
 
-        function createGraphic(point) {
-            // Suppression de tout les graphic présents
-            view.graphics.removeAll();
+        // Affichage d'un message lisible par l'utilisateur : une panne de service ne doit pas
+        // se traduire par une application qui semble figée (dégradation gracieuse)
+        var errorTimeout = null;
+        function showError(message){
+            var node = document.getElementById("errorMsg");
+            if (node == null) return;
+            node.textContent = message;
+            node.classList.remove("hidden");
+            if (errorTimeout != null){
+                window.clearTimeout(errorTimeout);
+            }
+            errorTimeout = window.setTimeout(function(){
+                node.classList.add("hidden");
+            }, 9000);
+        }
+
+        // Indicateur d'attente pendant l'enchaînement des deux requêtes (commune puis périmètre)
+        var isComputing = false;
+        function setBusy(busy){
+            isComputing = busy;
+            if (view != null && view.container != null){
+                view.container.style.cursor = busy ? "progress" : "";
+            }
+        }
+
+        function createGraphic(point, clear) {
+            // Suppression de tous les graphics présents, sauf demande contraire (clear = false)
+            if (clear !== false){
+                view.graphics.removeAll();
+            }
             // Création d'un graphic à l'emplacement en paramètre
             var graphic = new Graphic({
                 geometry: point,
@@ -695,58 +779,60 @@ Company : Esri France
                     }
                 }
             });
-            // Affichage du graphic créé
-            view.graphics.add(graphic);
-            return graphic;
-        };
-		
-				        function createGraphic2(point) {
-            // Suppression de tout les graphic présents
-            // Création d'un graphic à l'emplacement en paramètre
-            var graphic = new Graphic({
-                geometry: point,
-                symbol: {
-                    type: "simple-marker",
-                    color: "#007AC2",
-                    size: 8,
-                    outline: {
-                        color: "#FFFFFF",
-                        width: 1
-                    }
-                }
-            });
-			
-			
-
-            
-
             // Affichage du graphic créé
             view.graphics.add(graphic);
             return graphic;
         };
 
         function getIsoDistance(geom){
-            locationGraphic=createGraphic(geom);
-			//computeZone(locationGraphic);
-            view.ui.add(searchWidget2, {
-                position: "top-left",
-                index: 2
-            });
+            // Garde de réentrance : évite des chaînes de requêtes concurrentes sur des clics répétés
+            if (isComputing) return;
+            setBusy(true);
+            // La partie synchrone est protégée : sans cela une exception laisserait le verrou posé
+            // et tous les clics suivants seraient ignorés en silence
+            try {
+                locationGraphic=createGraphic(geom);
 
-            var query = comLayer.createQuery();
-            query.cacheHint=true;
-            query.geometry = (geom);  // the point location of the pointer
-            query.spatialRelationship = "intersects";  // this is the default
-            query.returnGeometry = false;
-            query.outFields = [ "CODEINSEE" ];
+                var query = comLayer.createQuery();
+                query.cacheHint=true;
+                query.geometry = (geom);  // the point location of the pointer
+                query.spatialRelationship = "intersects";  // this is the default
+                query.returnGeometry = false;
+                query.outFields = [ "CODEINSEE" ];
 
-            comLayer.queryFeatures(query)
-            .then(function(response){
-                // returns a feature set with features containing the
-                if (!response.features[0]) return;
-                code_insee=response.features[0].attributes.CODEINSEE;
-                queryIsoDistance().then(displayResults);
-            });
+                comLayer.queryFeatures(query)
+                .then(function(response){
+                    // returns a feature set with features containing the
+                    if (!response.features[0]) {
+                        // Clic en mer ou hors du territoire couvert : on l'explique au lieu de ne rien faire
+                        view.graphics.removeAll();
+                        // Le périmètre précédent est retiré aussi : il n'a plus de point de référence
+                        resultsLayer.removeAll();
+                        setBusy(false);
+                        showError("Cette application ne couvre que la France métropolitaine. Cliquez sur un point du territoire français.");
+                        return;
+                    }
+                    code_insee=response.features[0].attributes.CODEINSEE;
+                    // Second argument de then() plutôt que catch() : seul un rejet de la requête est
+                    // traité ici, une exception de displayResults n'est pas maquillée en panne de service
+                    return queryIsoDistance()
+                        .then(displayResults, function(error){
+                            console.error(error);
+                            setBusy(false);
+                            showError("Impossible de récupérer le périmètre pour cette commune, réessayez plus tard.");
+                        });
+                })
+                .catch(function(error){
+                    console.error(error);
+                    setBusy(false);
+                    showError("Le service de calcul est momentanément indisponible, réessayez plus tard.");
+                });
+            }
+            catch (error) {
+                console.error(error);
+                setBusy(false);
+                showError("Le calcul du périmètre a échoué, réessayez.");
+            }
         }
 
         searchWidget.on("select-result", function(event){
@@ -754,18 +840,28 @@ Company : Esri France
         });
 
         searchWidget2.on("select-result", function(event){
-            locationGraphic=createGraphic2(event.result.feature.geometry);
-            //view.center([event.result.feature.geometry.latitude,event.result.feature.geometry.longitude]);
+            // Le périmètre doit avoir été calculé avant de pouvoir tester l'appartenance d'une commune
+            if (!resultsLayer.graphics.length){
+                showError("Calculez d'abord un périmètre en cliquant sur la carte ou en recherchant une commune.");
+                return;
+            }
+            // Le point de la commune vérifiée s'ajoute sans effacer le point de référence
+            locationGraphic=createGraphic(event.result.feature.geometry, false);
 
             //verify intersection between resultsLayer and the city got from the searchWidget2
-            isContains=GeometryEngine.contains(resultsLayer.graphics.items[0].geometry,event.result.feature.geometry);
-            if(isContains){
-                locationGraphic.symbol.color="rgb(0,212,0)";
-				console.log(resultsLayer2);
-            }
-            else{
-                locationGraphic.symbol.color="rgb(255,0,0)";
-            }
+            var isContains = resultsLayer.graphics.some(function(zone){
+                return GeometryEngine.contains(zone.geometry, event.result.feature.geometry);
+            });
+            // Réaffectation du symbole complet, et non de sa seule couleur, pour forcer le rafraîchissement
+            locationGraphic.symbol = {
+                type: "simple-marker",
+                color: isContains ? "rgb(0,212,0)" : "rgb(255,0,0)",
+                size: 8,
+                outline: {
+                    color: "#FFFFFF",
+                    width: 1
+                }
+            };
             view.goTo([locationGraphic.geometry.longitude,locationGraphic.geometry.latitude]);
         });
 
@@ -779,6 +875,12 @@ Company : Esri France
         function displayResults(results) {
             //console.log(results);
             resultsLayer.removeAll();
+            if (!results.features.length){
+                // Requête aboutie mais aucun périmètre précalculé pour cette commune
+                setBusy(false);
+                showError("Aucun périmètre n'est disponible pour cette commune.");
+                return;
+            }
             var feature = results.features.map(function(graphic) {
                 graphic.symbol = {
                     type: "simple-fill",
@@ -794,33 +896,17 @@ Company : Esri France
             view.goTo(feature);
             resultsLayer.addMany(feature);
 			//console.log(feature);
-        };
-		
-		       function computeZone(graphicCenter){
-
-            // Draw simple circle
-			resultsLayer2.removeAll();
-            var circle = GeometryEngine.geodesicBuffer(graphicCenter.geometry, 100, "kilometers");
-
-            var graphicCircle = new Graphic({
-            geometry: circle,
-            symbol: {
-                    type: "simple-fill",
-                    color: [0, 122, 194, 0.1],
-                    outline: {  // autocasts as new SimpleLineSymbol()
-                        color: "rgba(0,122,194,100)",
-                        width: 2
-                    }
-                }
+            setBusy(false);
+            // La seconde barre de recherche n'a de sens qu'une fois le périmètre tracé
+            view.ui.add(searchWidget2, {
+                position: "top-left",
+                index: 2
             });
-            //view.graphics.add(graphicCircle,0);
-
-            //var serviceAreaParams = createServiceAreaParams(graphicCenter, view.spatialReference);
-            //executeServiceAreaTask(serviceAreaParams);
-
-            view.goTo(graphicCircle);
-			resultsLayer2.add(graphicCircle);
-
+            // Elle est ajoutée après le dernier passage de setTitleMobile : la classe mobile
+            // doit donc lui être appliquée ici, sinon elle attendrait un changement de breakpoint
+            if (view.widthBreakpoint === "xsmall" && searchWidget2.container != null){
+                searchWidget2.container.classList.add("esri-search-widget-mobile");
+            }
         };
 		
 
@@ -862,6 +948,9 @@ Company : Esri France
                 if (searchWidget != null && searchWidget.container != null){
                     searchWidget.container.classList.add("esri-search-widget-mobile");
                 }
+                if (searchWidget2 != null && searchWidget2.container != null){
+                    searchWidget2.container.classList.add("esri-search-widget-mobile");
+                }
             } else {
                 view.ui.add(titleDiv, {
                     position: "top-left",
@@ -869,6 +958,9 @@ Company : Esri France
                 });
                 if (searchWidget != null && searchWidget.container != null){
                     searchWidget.container.classList.remove("esri-search-widget-mobile");
+                }
+                if (searchWidget2 != null && searchWidget2.container != null){
+                    searchWidget2.container.classList.remove("esri-search-widget-mobile");
                 }
             }
         }
@@ -901,37 +993,35 @@ Company : Esri France
   <body>
     <div id="viewDiv">
         <div id="titleDiv" class="esri-widget"><div id="title">Votre zone de déconfinement à 100 kilomètres</div></div>
-        <div id="about" class="esri-component esri-widget" title="Aide">
-            <div class="esri-widget--button">
-                <span class="esri-icon-question">
-                </span>
-                <span class="esri-icon-font-fallback-text">Aide</span>
-            </div>
-        </div>
+        <button id="about" class="esri-component esri-widget esri-widget--button" title="Aide" aria-label="Aide">
+            <span class="esri-icon-question" aria-hidden="true"></span>
+        </button>
 
-        <div id="logoDiv" style="background-color: #FFFFFF; height: 60px"><a href="https://www.esrifrance.fr/" target="_blank"><img style="margin-top: 10px" src="./images/esri-france-logo-halo.png" alt="Esri France" width="150" /></a></div>
+        <div id="logoDiv" style="background-color: #FFFFFF; height: 60px"><a href="https://www.esrifrance.fr/" target="_blank" rel="noopener noreferrer"><img style="margin-top: 10px" src="./images/esri-france-logo-halo.png" alt="Esri France" width="150" /></a></div>
+        <div id="errorMsg" class="hidden esri-widget" role="status" aria-live="polite"></div>
         <div id="source" style="background-color: #FFFFFF; height: 60px" class="esri-widget">
-            <span class="highlightFont">#RestezChezVous​</span>
-            Consignes sur <a href="https://www.gouvernement.fr/info-coronavirus" target="_blank">gouvernement.fr​</a>
+            <span class="highlightFont">#RestezChezVous</span>
+            Consignes sur <a href="https://www.info.gouv.fr/info-coronavirus" target="_blank" rel="noopener noreferrer">info.gouv.fr</a>
         </div>
     </div>
     <div id="container">
         <div id="introDiv" class="hidden">
             <h1 style="font-size:22px">Déconfinement à 100 km</h1>
+            <p class="archive-note">Application d'archive réalisée en novembre 2020, pendant le second confinement. Les règles décrites ne sont plus en vigueur.</p>
             <div id="show-intro">
-                <p class="intro-p-desktop">Bienvenue ! Avec l'annonce du mercredi 28 Octobre, le confinement a repris et les déplacements sont limités, pour connaitre vos limites de déplacements vous pouvez:​​</p>
-                <p class="intro-p-desktop"><span class="highlightFont">Recherchez le nom de votre commune​</span>, ou<span class="highlightFont"> utilisez votre localisation actuelle​</span>, ou <span class="highlightFont">zoomez​</span> et naviguez librement dans la carte, puis <span class="highlightFont">cliquez sur le lieu de votre choix.</span> Vous verrez alors le périmètre de 100 km à vol d'oiseau (cercle), et les limites de votre département s'il dépasse.</p>
-				<p class="intro-p-desktop">Vérifiez si une commune est dans la zone (point vert) ou en dehors (rouge), avec la seconde zone de recherche.</p>
+                <p class="intro-p-desktop">Bienvenue ! Avec l'annonce du mercredi 28 Octobre, le confinement a repris et les déplacements sont limités, pour connaitre vos limites de déplacements vous pouvez:</p>
+                <p class="intro-p-desktop"><span class="highlightFont">Recherchez le nom de votre commune</span>, ou<span class="highlightFont"> utilisez votre localisation actuelle</span>, ou <span class="highlightFont">zoomez</span> et naviguez librement dans la carte, puis <span class="highlightFont">cliquez sur le lieu de votre choix.</span> Vous verrez alors le périmètre de 100 km à vol d'oiseau (cercle), et les limites de votre département s'il dépasse.</p>
+				<p class="intro-p-desktop">Vérifiez si une commune est dans la zone (point vert) ou en dehors (rouge), avec la seconde zone de recherche, qui apparaît une fois le premier périmètre calculé.</p>
                 <button id="start-appli">Commencer</button><br>
-				<p class="intro-p-desktop">Une application <span class="highlightFont"><a href="https://www.esrifrance.fr/">Esri France</a></span></p>
+				<p class="intro-p-desktop">Une application <span class="highlightFont"><a href="https://www.esrifrance.fr/" target="_blank" rel="noopener noreferrer">Esri France</a></span></p>
 				<p>Données : IGN, HERE   <span class="highlightFont">#RestezChezVous</span> </p>
             </div>
             <div id="show-about" class="hidden">
-                <button id="close-about" class="esri-icon-close"></button>
-                <p class="intro-p-desktop">Bienvenue ! Avec l'annonce du mercredi 28 Octobre, le confinement a repris et les déplacements sont limités, pour connaitre vos limites de déplacements vous pouvez:​​</p>
-                <p class="intro-p-desktop"><span class="highlightFont">Recherchez le nom de votre commune​</span>, ou<span class="highlightFont"> utilisez votre localisation actuelle​</span>, ou <span class="highlightFont">zoomez​</span> et naviguez librement dans la carte, puis <span class="highlightFont">cliquez sur le lieu de votre choix.</span> Vous verrez alors le périmètre de 100 km à vol d'oiseau (cercle), et les limites de votre département s'il dépasse.</p>
-				<p class="intro-p-desktop">Vérifiez si une commune est dans la zone (point vert) ou en dehors (rouge), avec la seconde zone de recherche.</p>
-				<p class="intro-p-desktop">Une application <span class="highlightFont"><a href="https://www.esrifrance.fr/">Esri France</a></span><p>
+                <button id="close-about" class="esri-icon-close" title="Fermer l'aide" aria-label="Fermer l'aide"></button>
+                <p class="intro-p-desktop">Bienvenue ! Avec l'annonce du mercredi 28 Octobre, le confinement a repris et les déplacements sont limités, pour connaitre vos limites de déplacements vous pouvez:</p>
+                <p class="intro-p-desktop"><span class="highlightFont">Recherchez le nom de votre commune</span>, ou<span class="highlightFont"> utilisez votre localisation actuelle</span>, ou <span class="highlightFont">zoomez</span> et naviguez librement dans la carte, puis <span class="highlightFont">cliquez sur le lieu de votre choix.</span> Vous verrez alors le périmètre de 100 km à vol d'oiseau (cercle), et les limites de votre département s'il dépasse.</p>
+				<p class="intro-p-desktop">Vérifiez si une commune est dans la zone (point vert) ou en dehors (rouge), avec la seconde zone de recherche, qui apparaît une fois le premier périmètre calculé.</p>
+				<p class="intro-p-desktop">Une application <span class="highlightFont"><a href="https://www.esrifrance.fr/" target="_blank" rel="noopener noreferrer">Esri France</a></span><p>
                 <p>Données : IGN, HERE   <span class="highlightFont">#RestezChezVous</span> <p>
             </div>
         </div>
