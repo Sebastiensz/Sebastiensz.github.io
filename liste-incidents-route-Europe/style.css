@@ -17,7 +17,9 @@ body,
 #formDiv {
     background: white;
     padding: 10px;
-    width: 100%;
+    width: auto;
+    max-width: min(320px, 90vw);
+    box-sizing: border-box;
 }
 
 #filter-type {
@@ -25,6 +27,84 @@ body,
     margin-bottom: 10px;
 }
 
+#filter label {
+    display: block;
+    margin-bottom: 2px;
+}
+
 #cluster {
     margin-top: 10px;
+}
+
+/* Commandes neutralisées quand les données ne sont pas disponibles */
+#formDiv select:disabled,
+#formDiv button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* Indicateur d'attente affiché tant que la carte n'est pas prête */
+#loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: white;
+    font-size: 1rem;
+}
+
+#loading[hidden] {
+    display: none;
+}
+
+.loading-spinner {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #c8c8c8;
+    border-top-color: #4a4a4a;
+    border-radius: 50%;
+    animation: loading-spin 0.9s linear infinite;
+}
+
+@keyframes loading-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Bandeau d'erreur : visible sans masquer la carte */
+#dataError {
+    position: fixed;
+    left: 50%;
+    bottom: 40px;
+    transform: translateX(-50%);
+    z-index: 15;
+    width: max-content;
+    max-width: min(560px, calc(100vw - 24px));
+    box-sizing: border-box;
+    padding: 10px 14px;
+    background: white;
+    border-left: 4px solid #d83020;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    font-size: 0.875rem;
+    line-height: 1.35;
+}
+
+#dataError[hidden] {
+    display: none;
+}
+
+/* Sur petit écran, le titre ne doit plus être tronqué */
+@media (max-width: 767px) {
+    #titleDiv {
+        font-size: 1rem;
+        max-width: calc(100vw - 120px);
+        white-space: normal;
+    }
 }
