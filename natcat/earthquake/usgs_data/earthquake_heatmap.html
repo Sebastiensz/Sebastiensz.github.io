@@ -1,13 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="initial-scale=1,maximum-scale=1,user-scalable=no"
-    />
+    <meta name="viewport" content="initial-scale=1" />
 
-<title>Earthquakes in the last month</title>
+    <title>Séismes — carte de densité (heatmap) | USGS</title>
 
     <style>
       html,
@@ -18,26 +15,82 @@
         height: 100%;
         width: 100%;
       }
-      #séisme {
-        color:brown;
+      #titleDiv {
+        padding: 10px;
+        font-weight: bold;
+        text-align: center;
+        font-size: 20px;
       }
-          #titleDiv {
-      padding: 10px;
-      font-weight: bold;
-      text-align: center;
-      font-size: 20px;
-    }
-    
-    #source {
-      padding: 10px;
-      font-weight: normal;
-      text-align: center;
-      font-size:12px;
-      position: absolute;
-      right: 10px;
-      bottom: 120px;
-      width:160px;
+      #titleDiv h1 {
+        font-size: 18px;
+        margin: 0;
+        font-weight: bold;
       }
+
+      /* Sélecteur de période, dans le coin haut-droit de la vue */
+      #periodBox {
+        padding: 8px 10px;
+      }
+      #periodBox label {
+        display: block;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .5px;
+        margin-bottom: 4px;
+      }
+      #period-select {
+        font-size: 13px;
+      }
+
+      /* Crédit de la source + navigation entre les trois vues */
+      #source {
+        padding: 8px 10px;
+        font-weight: normal;
+        text-align: center;
+        font-size: 12px;
+        width: 215px;
+        line-height: 1.6;
+      }
+      #source a { color: #e8b23a; text-decoration: none; }
+      #source .views a { color: #f0f0f0; }
+      #source .views a[aria-current="page"] { color: #e8b23a; font-weight: 700; }
+
+      /* Overlay de chargement (le flux du dernier mois pèse ~8 Mo) */
+      #loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 100;
+        padding: 16px 24px;
+        border-radius: 8px;
+        background: rgba(20, 20, 20, .88);
+        color: #f0f0f0;
+        font-family: sans-serif;
+        font-size: 13px;
+        transition: opacity .4s;
+      }
+      #loading.hidden { opacity: 0; pointer-events: none; }
+
+      /* Message visible si le flux USGS ou la carte est indisponible */
+      #error {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 101;
+        max-width: 320px;
+        padding: 16px 20px;
+        border-radius: 8px;
+        border: 1px solid rgba(239, 68, 68, .6);
+        background: rgba(38, 10, 12, .96);
+        color: #ffd9d9;
+        font-family: sans-serif;
+        font-size: 13px;
+        line-height: 1.45;
+        text-align: center;
+      }
+      #error.hidden { display: none; }
     </style>
 
     <link
@@ -45,67 +98,130 @@
       href="https://js.arcgis.com/4.21/esri/themes/dark/main.css"
     />
     <script src="https://js.arcgis.com/4.21/"></script>
-<select id="séisme"></select>
+  </head>
+
+  <body>
+    <div id="viewDiv" aria-label="Carte de densité des séismes USGS"></div>
+
+    <div id="loading" role="status" aria-live="polite">⏳ Chargement des données USGS…</div>
+    <div id="error" class="hidden" role="alert"></div>
+
+    <div id="titleDiv" class="esri-widget">
+      <h1 id="titleText">Densité de séismes</h1>
+    </div>
+
+    <div id="periodBox" class="esri-widget">
+      <label for="period-select">Période de temps</label>
+      <select id="period-select" class="esri-select">
+        <option value="all_month.geojson">Dernier mois</option>
+        <option value="all_week.geojson">Dernière semaine</option>
+        <option value="all_day.geojson">Dernier jour</option>
+        <option value="all_hour.geojson">Dernière heure</option>
+      </select>
+    </div>
+
+    <div id="source" class="esri-widget">
+      <div class="views">
+        <a href="index.html">Carte</a> ·
+        <a href="earthquake_heatmap.html" aria-current="page">Heatmap</a> ·
+        <a href="earthquakes_last_month_3D.html">3D</a>
+      </div>
+      Données : USGS Earthquake Hazards Program
+    </div>
+
     <script>
       require([
         "esri/Map",
         "esri/layers/GeoJSONLayer",
-        "esri/views/MapView","esri/widgets/Legend","esri/widgets/Home","esri/widgets/Expand"
-      ], function(Map, GeoJSONLayer, MapView,Legend,Home,Expand) {
+        "esri/views/MapView",
+        "esri/widgets/Legend",
+        "esri/widgets/Home",
+        "esri/widgets/Expand"
+      ], function(Map, GeoJSONLayer, MapView, Legend, Home, Expand) {
 
-        
-        
-        // Paste the url into a browser's address bar to download and view the attributes
-        // in the GeoJSON file. These attributes include:
-        // * mag - magnitude
-        // * type - earthquake or other event such as nuclear test
-        // * place - location of the event
-        // * time - the time of the event
-        // Use the Arcade Date() function to format time field into a human-readable format
+        const BASE = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/";
 
+        function hideLoading() { document.getElementById("loading").classList.add("hidden"); }
+        function showLoading() { document.getElementById("loading").classList.remove("hidden"); }
+        function clearError()  { document.getElementById("error").classList.add("hidden"); }
+        function showError(msg) {
+          var el = document.getElementById("error");
+          el.textContent = msg;
+          el.classList.remove("hidden");
+          hideLoading();
+        }
+
+        // "time" est un epoch en millisecondes inféré en double : dateFormat serait ignoré,
+        // on le met en forme avec Arcade. Idem pour le type d'événement, en anglais dans le flux.
         const template = {
-          title: "Earthquake information in real time",
-          content: "An {type} of magnitude {mag} hit {place} at {time}",
-          fieldInfos: [
+          title: "{place}",
+          expressionInfos: [
             {
-              fieldName: "time",
-              format: {
-                dateFormat: "short-date-short-time"
-              }
+              name: "dateLisible",
+              title: "Date et heure",
+              expression: "IIf(IsEmpty($feature.time), 'n/d', Text(Date($feature.time), 'DD/MM/Y HH:mm'))"
+            },
+            {
+              name: "typeFr",
+              title: "Type d'événement",
+              expression: "Decode($feature.type, 'earthquake', 'Séisme', 'quarry blast', 'Tir de carrière', 'explosion', 'Explosion', 'mining explosion', 'Explosion minière', 'ice quake', 'Séisme glaciaire', $feature.type)"
             }
-          ]
+          ],
+          content:
+            "{expression/typeFr} de magnitude <b>{mag}</b> à {place},<br>le {expression/dateLisible}."
         };
 
-const renderer = {
-  type: "heatmap",
-  colorStops: [
-    { color: "rgba(63, 40, 102, 0)", ratio: 0 },
-    { color: "#472b77", ratio: 0.083 },
-    { color: "#4e2d87", ratio: 0.166 },
-    { color: "#563098", ratio: 0.249 },
-    { color: "#5d32a8", ratio: 0.332 },
-    { color: "#6735be", ratio: 0.415 },
-    { color: "#7139d4", ratio: 0.498 },
-    { color: "#7b3ce9", ratio: 0.581 },
-    { color: "#853fff", ratio: 0.664 },
-    { color: "#a46fbf", ratio: 0.747 },
-    { color: "#c29f80", ratio: 0.83 },
-    { color: "#e0cf40", ratio: 0.913 },
-    { color: "#ffff00", ratio: 1 }
-  ],
-  maxDensity: 9999990.01,
-  minDensity: 0
-};
+        // En 4.21 le renderer heatmap se règle avec maxPixelIntensity / minPixelIntensity ;
+        // maxDensity / minDensity (4.24+) étaient ignorés, d'où la saturation des zones denses.
+        // Valeur calibrée sur l'étendue d'ouverture (zoom 3), desktop ET mobile : au-delà de
+        // ~300 les foyers modérés (Méditerranée, Égée, Islande) disparaissent de la vue par défaut.
+        const renderer = {
+          type: "heatmap",
+          blurRadius: 12,
+          colorStops: [
+            { color: "rgba(63, 40, 102, 0)", ratio: 0 },
+            { color: "#472b77", ratio: 0.083 },
+            { color: "#4e2d87", ratio: 0.166 },
+            { color: "#563098", ratio: 0.249 },
+            { color: "#5d32a8", ratio: 0.332 },
+            { color: "#6735be", ratio: 0.415 },
+            { color: "#7139d4", ratio: 0.498 },
+            { color: "#7b3ce9", ratio: 0.581 },
+            { color: "#853fff", ratio: 0.664 },
+            { color: "#a46fbf", ratio: 0.747 },
+            { color: "#c29f80", ratio: 0.83 },
+            { color: "#e0cf40", ratio: 0.913 },
+            { color: "#ffff00", ratio: 1 }
+          ],
+          maxPixelIntensity: 200,
+          minPixelIntensity: 0
+        };
 
-        //load a first layer
-        const geojsonLayer = new GeoJSONLayer({
-          url: "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.geojson",
-          renderer: renderer, //optional
-          popupTemplate:template
-        });
+        function makeLayer(fileName) {
+          return new GeoJSONLayer({
+            url: BASE + fileName,
+            title: "Densité de séismes (USGS)",
+            copyright: "USGS Earthquake Hazards Program",
+            renderer: renderer,
+            popupTemplate: template
+          });
+        }
+
+        // suit le chargement de la couche affichée et signale un flux indisponible
+        function watchLayer(layer) {
+          showLoading();
+          layer.when(function() {
+            clearError();
+            hideLoading();
+          }, function() {
+            showError("Données USGS momentanément indisponibles. Réessayez dans quelques minutes.");
+          });
+        }
+
+        const geojsonLayer = makeLayer("all_month.geojson");
+        watchLayer(geojsonLayer);
 
         const map = new Map({
-          //basemap: "oceans",
           basemap: "satellite",
           layers: [geojsonLayer]
         });
@@ -116,84 +232,39 @@ const renderer = {
           zoom: 3,
           map: map
         });
-        // create a dropdown list with several options to see more or less recent earthquakes
-      let séisme=document.getElementById("séisme");
-      
-        let option1=document.createElement("option");
-     option1.textContent="all_month.geojson";
-      séisme.appendChild(option1);
-   //   option1.textContent="Séismes dans le dernier mois";
-        
-     let option2=document.createElement("option");
-     option2.textContent="all_week.geojson";
-      séisme.appendChild(option2);
-    //  option2.textContent="Séismes dans la dernière semaine";  
-        
-      let option3=document.createElement("option");
-      option3.textContent="all_day.geojson";
-      séisme.appendChild(option3);
-    //  option3.textContent="Séismes dans le dernier jour";  
-        
-      let option4=document.createElement("option");
-      option4.textContent="all_hour.geojson";
-      séisme.appendChild(option4);
-    //  option4.textContent="Séismes dans la dernière heure";  
-        
- view.ui.add(séisme, "top-right"); //position the dropdown list at the top-right       
-    // define the event when we change the earthquake in the dropdown list, the map is updated with the new layer
-        
-              view.ui.add("titleDiv", {
-        position: "top-left",
-        index: 0
-      });
-      
-      //view.ui.add("source","manual");
-        
-        var homeWidget = new Home({
-        view: view,
-          index: 3
-      });
 
-      // adds the home widget to the top left corner of the MapView
-      view.ui.add(homeWidget, "top-left");
+        view.when(null, function() {
+          showError("La carte n'a pas pu être initialisée dans ce navigateur.");
+        });
 
- const legend = new Legend({
-        view: view,
-        layerInfos: [{
-          layer: geojsonLayer,
-          title: "Légende",
-        }]
-      });
-      const legendExpand = new Expand({
-        expandIconClass: "esri-icon-drag-horizontal",
-        expandTooltip: "Legend",
-        view: view,
-        expanded: false,
-        content: legend,
-      });
-      view.ui.add(legendExpand, "top-left");   
-        
-séisme.addEventListener("change",function(){
-  let selectedService=séisme.options[séisme.selectedIndex].textContent;
-        let layer = new GeoJSONLayer({
-          url:"https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/" +selectedService,
-          renderer:renderer,
-          popupTemplate:template,
-        })
-        map.removeAll(); //don't have too much layers loaded
-        map.add(layer);
+        const periodSelect = document.getElementById("period-select");
+        view.ui.add("periodBox", "top-right");
+        view.ui.add("titleDiv", { position: "top-left", index: 0 });
+        view.ui.add("source", "bottom-right");
 
-      })
-  
-      });
+        view.ui.add(new Home({ view: view }), "top-left");
 
+        // sans layerInfos, la légende suit automatiquement la couche réellement affichée
+        const legend = new Legend({ view: view });
+        const legendExpand = new Expand({
+          expandIconClass: "esri-icon-legend",
+          expandTooltip: "Légende",
+          view: view,
+          expanded: false,
+          content: legend
+        });
+        view.ui.add(legendExpand, "top-left");
+
+        // changement de période : on remplace la couche affichée
+        periodSelect.addEventListener("change", function() {
+          const layer = makeLayer(periodSelect.value);
+          clearError();
+          watchLayer(layer);
+          map.removeAll();   // on ne garde qu'une couche à la fois
+          map.add(layer);
+        });
+
+      });
     </script>
-  </head>
-
-  <body>
-    <div id="viewDiv"></div>
-      <div id="titleDiv" class="esri-widget">
-    <div id="titleText">Earthquakes Heatmap</div>
-  </div>
   </body>
 </html>

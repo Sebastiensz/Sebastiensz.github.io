@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <title>Intro to CSVLayer | Sample | ArcGIS API for JavaScript 4.24</title>
+    <meta name="viewport" content="initial-scale=1" />
+    <title>Séismes du dernier mois — vue 3D | USGS</title>
 
     <style>
       html,
@@ -22,35 +22,189 @@
       .esri-legend {
         background-color: rgba(255, 255, 255, 0.8);
       }
+
+      .hidden { display: none !important; }
+
+      /* Titre de page pour les lecteurs d'écran : le bandeau visible #titleDiv n'apparaît
+         qu'une fois la scène 3D démarrée, la page n'aurait sinon aucun h1 en mode repli. */
+      .sr-only {
+        position: absolute;
+        width: 1px; height: 1px;
+        padding: 0; margin: -1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      #titleDiv {
+        padding: 10px;
+        text-align: center;
+      }
+      #titleDiv .title {
+        font-size: 16px;
+        font-weight: bold;
+        margin: 0;
+      }
+
+      /* Crédit de la source + navigation entre les trois vues */
+      #source {
+        padding: 8px 10px;
+        font-size: 12px;
+        text-align: center;
+        width: 215px;
+        line-height: 1.6;
+      }
+      #source .views a[aria-current="page"] { font-weight: 700; }
+
+      /* Overlay de chargement : le CSV du dernier mois pèse ~2 Mo, non compressé */
+      #loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 100;
+        padding: 16px 24px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, .92);
+        border: 1px solid #d0d7de;
+        color: #24292f;
+        font-family: sans-serif;
+        font-size: 13px;
+      }
+
+      /* Message de repli : sans WebGL matériel la scène 3D ne peut pas s'afficher */
+      #fallback {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 101;
+        max-width: 340px;
+        padding: 18px 22px;
+        border-radius: 8px;
+        background: #ffffff;
+        border: 1px solid #d0d7de;
+        box-shadow: 0 2px 12px rgba(0, 0, 0, .15);
+        color: #24292f;
+        font-family: sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+        text-align: center;
+      }
+      #fallback a { color: #0079c1; }
     </style>
 
     <link rel="stylesheet" href="https://js.arcgis.com/4.24/esri/themes/light/main.css" />
     <script src="https://js.arcgis.com/4.24/"></script>
+  </head>
+
+  <body>
+    <h1 class="sr-only">Séismes du dernier mois — vue 3D (USGS)</h1>
+
+    <div id="viewDiv" aria-label="Scène 3D des séismes USGS du dernier mois"></div>
+
+    <div id="loading" role="status" aria-live="polite">⏳ Chargement des séismes du dernier mois…</div>
+
+    <div id="fallback" class="hidden" role="alert">
+      <p id="fallbackMsg"></p>
+      <p>
+        Les mêmes données restent consultables en 2D :<br />
+        <a href="index.html">carte des séismes</a> ·
+        <a href="earthquake_heatmap.html">carte de densité</a>
+      </p>
+      <p>Données : USGS Earthquake Hazards Program</p>
+    </div>
+
+    <div id="titleDiv" class="esri-widget hidden">
+      <div class="title">Séismes du dernier mois — vue 3D</div>
+    </div>
+
+    <div id="source" class="esri-widget hidden">
+      <div class="views">
+        <a href="index.html">Carte</a> ·
+        <a href="earthquake_heatmap.html">Heatmap</a> ·
+        <a href="earthquakes_last_month_3D.html" aria-current="page">3D</a>
+      </div>
+      Données : USGS Earthquake Hazards Program
+    </div>
 
     <script>
-      require(["esri/WebScene", "esri/layers/CSVLayer", "esri/views/SceneView"], (
-        WebScene,
-        CSVLayer,
-        SceneView
-      ) => {
-        // If CSV files are not on the same domain as your website, a CORS enabled server
-        // or a proxy is required.
+      require([
+        "esri/Map",
+        "esri/WebScene",
+        "esri/layers/CSVLayer",
+        "esri/views/SceneView",
+        "esri/core/reactiveUtils"
+      ], (Map, WebScene, CSVLayer, SceneView, reactiveUtils) => {
         const url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.csv";
 
-        // Paste the url into a browser's address bar to download and view the attributes
-        // in the CSV file. These attributes include:
-        // * mag - magnitude
-        // * type - earthquake or other event such as nuclear test
-        // * place - location of the event
-        // * time - the time of the event
+        const el = (id) => document.getElementById(id);
+        const show = (id) => el(id).classList.remove("hidden");
+        const hide = (id) => el(id).classList.add("hidden");
 
+        // Repli visible : sans lui, une scène qui n'arrive pas à s'afficher laisse une page vide
+        function showFallback(msg) {
+          el("fallbackMsg").textContent = msg;
+          show("fallback");
+          hide("loading");
+          hide("titleDiv");
+          hide("source");
+        }
+
+        // La SceneView exige WebGL : on prévient l'utilisateur avant même de la créer
+        function webglSupported() {
+          try {
+            const c = document.createElement("canvas");
+            return !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
+          } catch (e) {
+            return false;
+          }
+        }
+
+        if (!webglSupported()) {
+          showFallback(
+            "La vue 3D nécessite WebGL, que ce navigateur ne fournit pas."
+          );
+          return;
+        }
+
+        // Dans le CSV USGS, "mag" et "depth" sont inférés en texte (valeurs brutes du type
+        // 1.3982701812065) et "time" en date : on remet tout en forme via Arcade.
         const template = {
-          title: "Earthquake Info",
-          content: "Magnitude {mag} {type} hit {place} on {time}."
+          title: "{place}",
+          expressionInfos: [
+            {
+              name: "dateLisible",
+              title: "Date et heure",
+              expression:
+                "IIf(TypeOf($feature.time) == 'Date', Text($feature.time, 'DD/MM/Y HH:mm'), Text($feature.time))"
+            },
+            {
+              name: "magArrondie",
+              title: "Magnitude",
+              expression: "IIf(IsEmpty($feature.mag), 'n/d', Text(Round(Number($feature.mag), 1)))"
+            },
+            {
+              name: "profondeur",
+              title: "Profondeur",
+              expression: "IIf(IsEmpty($feature.depth), 'n/d', Text(Round(Number($feature.depth), 1)) + ' km')"
+            },
+            {
+              name: "typeFr",
+              title: "Type d'événement",
+              expression:
+                "Decode($feature.type, 'earthquake', 'Séisme', 'quarry blast', 'Tir de carrière', 'explosion', 'Explosion', 'mining explosion', 'Explosion minière', 'ice quake', 'Séisme glaciaire', $feature.type)"
+            }
+          ],
+          content:
+            "{expression/typeFr} de magnitude <b>{expression/magArrondie}</b> à {place},<br>" +
+            "le {expression/dateLisible}.<br>Profondeur : {expression/profondeur}."
         };
 
         const csvLayer = new CSVLayer({
           url: url,
+          title: "Séismes du dernier mois (USGS)",
           copyright: "USGS Earthquakes",
           popupTemplate: template
         });
@@ -59,8 +213,7 @@
           type: "simple", // autocasts as new SimpleRenderer()
           symbol: {
             type: "point-3d", // autocasts as new PointSymbol3D()
-            // for this symbol we use 2 symbol layers, one for the outer circle
-            // and one for the inner circle
+            // deux couches de symbole : le disque central et son halo
             symbolLayers: [{
               type: "icon", // autocasts as new IconSymbol3DLayer()
               resource: { primitive: "circle"},
@@ -108,11 +261,56 @@
             }
           }
         });
+
+        view.ui.add("titleDiv", { position: "top-right", index: 0 });
+        view.ui.add("source", "bottom-right");
+
+        // filet de sécurité : sans lui, une scène qui ne démarre jamais laisse un écran figé.
+        // Le message disparaît tout seul si la vue finit par s'afficher.
+        const watchdog = setTimeout(() => {
+          if (!view.ready) {
+            showFallback(
+              "La vue 3D n'arrive pas à démarrer sur ce poste (WebGL indisponible, ou connexion trop lente)."
+            );
+          }
+        }, 60000);
+
+        view.when(
+          () => {
+            clearTimeout(watchdog);
+            hide("fallback");
+            show("titleDiv");
+            show("source");
+            // l'overlay reste affiché tant que les points du CSV (~2 Mo) ne sont pas dessinés
+            view
+              .whenLayerView(csvLayer)
+              .then((lv) => reactiveUtils.whenOnce(() => !lv.updating))
+              .then(() => hide("loading"))
+              .catch(() => hide("loading"));
+          },
+          () => {
+            clearTimeout(watchdog);
+            showFallback(
+              "La vue 3D n'a pas pu démarrer : elle demande un navigateur avec accélération " +
+                "matérielle WebGL (carte graphique activée)."
+            );
+          }
+        );
+
+        // La scène de fond est un item public d'Esri : s'il devient indisponible,
+        // on rebascule sur un globe équivalent construit localement.
+        map.load().catch(() => {
+          map.layers.remove(csvLayer);
+          const repli = new Map({ basemap: "satellite", ground: "world-elevation" });
+          repli.add(csvLayer);
+          view.map = repli;
+        });
+
+        // Le flux CSV lui-même : on ne laisse pas l'échec silencieux
+        csvLayer.load().catch(() => {
+          showFallback("Données USGS momentanément indisponibles. Réessayez dans quelques minutes.");
+        });
       });
     </script>
-  </head>
-
-  <body>
-    <div id="viewDiv"></div>
   </body>
 </html>
