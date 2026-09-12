@@ -2,23 +2,31 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="initial-scale=1,maximum-scale=1,user-scalable=no"
-    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
   ArcGIS API for JavaScript, https://js.arcgis.com
   For more information about the views-composite-views sample, read the original sample description at developers.arcgis.com.
   https://developers.arcgis.com/javascript/latest/sample-code/views-composite-views/index.html
   -->
-<title>
-      Create an app with composite views | Sample | ArcGIS API for JavaScript
-      4.16
-    </title>
+    <title>Carte de France : départements et régions</title>
+    <meta
+      name="description"
+      content="Carte interactive des départements français coloriés par région, avec cartons Guyane et La Réunion."
+    />
 
+    <!--
+  La 4.16 demande https://symbols/patterns/backward-diagonal.png : chemin interne
+  mal résolu par le SDK (ERR_NAME_NOT_RESOLVED en console). Sans effet ici, le
+  rendu n'utilise que des aplats ; corrigé dans les versions ultérieures du SDK.
+  -->
+    <link
+      rel="stylesheet"
+      href="https://js.arcgis.com/4.16/esri/themes/light/main.css"
+    />
     <style>
       html,
       body,
+      main,
       #mainViewDiv {
         padding: 0;
         margin: 0;
@@ -26,27 +34,131 @@
         width: 100%;
       }
 
-      #akViewDiv {
+      /* Cartons DOM : un conteneur relatif porte le libellé, la vue occupe l'intérieur */
+      .carton {
+        position: relative;
+        padding: 0;
+        margin: 0;
+        background-color: rgba(255, 255, 255, 0.9);
+      }
+
+      #guyaneViewDiv {
         padding: 0;
         margin: 0;
         height: 225px;
         width: 300px;
-        background-color: rgba(255, 255, 255, 0.9);
       }
 
-      #hiViewDiv {
+      #reunionViewDiv {
         padding: 0;
         margin: 0;
         height: 135px;
         width: 200px;
-        background-color: rgba(255, 255, 255, 0.9);
+      }
+
+      .carton-label {
+        position: absolute;
+        left: 4px;
+        bottom: 4px;
+        z-index: 1;
+        padding: 1px 5px;
+        border-radius: 2px;
+        background: rgba(255, 255, 255, 0.85);
+        color: #323232;
+        font-size: 12px;
+        line-height: 1.2;
+        pointer-events: none;
+      }
+
+      /* Bandeau de titre, sert aussi de <h1> pour les lecteurs d'écran */
+      #titreCarte {
+        max-width: 320px;
+        padding: 8px 12px;
+      }
+
+      #titreCarte h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: #323232;
+      }
+
+      #titreCarte p {
+        margin: 4px 0 0;
+        font-size: 11px;
+        line-height: 1.35;
+        color: #6e6e6e;
+      }
+
+      /* La légende compte 26 entrées : le panneau Expand en plafonne la hauteur,
+         on garantit ici le défilement interne plutôt qu'une liste tronquée */
+      .esri-legend {
+        overflow-y: auto;
+      }
+
+      #chargement {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f4f4f4;
+        color: #323232;
+        font-size: 15px;
+        font-family: "Avenir Next W00", "Helvetica Neue", Helvetica, Arial,
+          sans-serif;
+      }
+
+      #messageErreur,
+      .noscript {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 11;
+        padding: 10px 14px;
+        background: #d83020;
+        color: #fff;
+        font-size: 14px;
+        line-height: 1.4;
+        text-align: center;
+        font-family: "Avenir Next W00", "Helvetica Neue", Helvetica, Arial,
+          sans-serif;
+      }
+
+      @media (max-width: 600px) {
+        #guyaneViewDiv {
+          height: 112px;
+          width: 150px;
+        }
+
+        #reunionViewDiv {
+          height: 68px;
+          width: 100px;
+        }
+
+        .carton-label {
+          font-size: 10px;
+        }
+
+        #titreCarte {
+          max-width: 62vw;
+          padding: 6px 8px;
+        }
+
+        #titreCarte h1 {
+          font-size: 13px;
+        }
+
+        #titreCarte p {
+          font-size: 10px;
+        }
       }
     </style>
-
-    <link
-      rel="stylesheet"
-      href="https://js.arcgis.com/4.16/esri/themes/light/main.css"
-    />
     <script src="https://js.arcgis.com/4.16/"></script>
 
     <script>
@@ -54,14 +166,63 @@
         "esri/Map",
         "esri/views/MapView",
         "esri/layers/FeatureLayer",
-        "esri/widgets/Legend"
-      ], function (Map, MapView, FeatureLayer, Legend) {
+        "esri/geometry/Extent",
+        "esri/widgets/Legend",
+        "esri/widgets/Expand",
+        "esri/widgets/Home"
+      ], function (Map, MapView, FeatureLayer, Extent, Legend, Expand, Home) {
+        // Déclarées en tête : une exception plus bas ne doit jamais les laisser
+        // dans la zone morte temporelle, le survol s'en sert à chaque mouvement.
+        let highlight = null;
+        let lastHighlight = null;
+
+        // Écran large avec souris : infobulle au survol, panneau ancré en haut à droite.
+        // Écran tactile ou étroit : pas de survol possible, l'infobulle s'ouvre au clic.
+        var souris = !!(
+          window.matchMedia && window.matchMedia("(hover: hover)").matches
+        );
+        var modeSurvol = souris && window.innerWidth >= 768;
+
+        // Emprise d'origine (paysage) et repli sur la France métropolitaine pour
+        // les écrans en portrait, où respecter l'emprise paysage afficherait
+        // de l'Afrique équatoriale à l'Arctique.
+        var EMPRISE_PAYSAGE = new Extent({
+          xmin: -1768604.600865072,
+          ymin: 4041258.878015175,
+          xmax: 2593505.276837248,
+          ymax: 7234273.024805922,
+          spatialReference: { wkid: 3857 }
+        });
+
+        var EMPRISE_PORTRAIT = new Extent({
+          xmin: -700000,
+          ymin: 4980000,
+          xmax: 1180000,
+          ymax: 6700000,
+          spatialReference: { wkid: 3857 }
+        });
+
+        var RATIO_PAYSAGE = EMPRISE_PAYSAGE.width / EMPRISE_PAYSAGE.height;
+
+        function empriseAdaptee(largeur, hauteur) {
+          return largeur / hauteur < RATIO_PAYSAGE
+            ? EMPRISE_PORTRAIT
+            : EMPRISE_PAYSAGE;
+        }
+
         var layer = new FeatureLayer({
           portalItem: {
             id: "150032ab8c41424bb227798c90383eb6"
           },
-          outFields: ["*"],
-          title: "Les régions en France"
+          outFields: ["FID", "N_Département", "Département", "Région"],
+          title:
+            "Départements français, coloriés par région (découpage pré-2016)",
+          copyright:
+            "Source : Région_Santé_France, Esri France (P. Tavaud), 2013 — découpage antérieur à la réforme régionale de 2016",
+          popupTemplate: {
+            title: "{Département}",
+            content: "Région : {Région}<br />N° de département : {N_Département}"
+          }
         });
 
         var map = new Map({
@@ -74,39 +235,41 @@
           map: map,
           popup: {
             highlightEnabled: false,
-            dockEnabled: true,
+            dockEnabled: modeSurvol,
             dockOptions: {
               breakpoint: false,
               position: "top-right"
             }
           },
-          extent: {
-xmin: -1768604.600865072,
-ymin: 4041258.878015175,
-xmax: 2593505.276837248,
-ymax: 7234273.024805922,
-            spatialReference: {
-              wkid: 3857
-            }
-          },
+          extent: empriseAdaptee(window.innerWidth, window.innerHeight),
           spatialReference: {
-            // NAD_1983_Contiguous_USA_Albers
+            // Web Mercator (3857)
             wkid: 3857
           },
           ui: {
-            components: ["attribution"]
+            components: ["attribution", "zoom"]
           }
         });
 
+        mainView.ui.add("titreCarte", { position: "top-left", index: 0 });
+        mainView.ui.add(new Home({ view: mainView }), "top-left");
+
         mainView.ui.add(
-          new Legend({
-            view: mainView
+          new Expand({
+            view: mainView,
+            content: new Legend({
+              view: mainView
+            }),
+            expandIconClass: "esri-icon-layer-list",
+            expandTooltip: "Afficher la légende",
+            collapseTooltip: "Masquer la légende",
+            expanded: modeSurvol
           }),
           "bottom-right"
         );
 
-        var akView = new MapView({
-          container: "akViewDiv",
+        var guyaneView = new MapView({
+          container: "guyaneViewDiv",
           map: map,
           extent: {
 xmin: -6580562.262190191,
@@ -118,17 +281,17 @@ ymax: 934539.6899638276,
             }
           },
           spatialReference: {
-            // WGS_1984_EPSG_Alaska_Polar_Stereographic
+            // Web Mercator (3857)
             wkid: 3857
           },
           ui: {
             components: []
           }
         });
-        mainView.ui.add("akViewDiv", "bottom-left");
+        mainView.ui.add("guyaneCarton", "bottom-left");
 
-        var hiView = new MapView({
-          container: "hiViewDiv",
+        var reunionView = new MapView({
+          container: "reunionViewDiv",
           map: map,
           extent: {
  xmin: 46188627.7306619,
@@ -140,86 +303,139 @@ ymax: -2359801.2525520697,
             }
           },
           spatialReference: {
-            // Hawaii_Albers_Equal_Area_Conic
+            // Web Mercator (3857)
             wkid: 3857
           },
           ui: {
             components: []
           }
         });
-        mainView.ui.add("hiViewDiv", "bottom-left");
-        
+        mainView.ui.add("reunionCarton", "bottom-left");
 
+        // when() et non then() : depuis la 4.x une MapView n'est plus une promesse.
         mainView
           .when(maintainFixedExtent)
+          .then(function (view) {
+            // sur écran tactile, faute de survol, on laisse le clic ouvrir l'infobulle
+            return modeSurvol ? disablePopupOnClick(view) : view;
+          })
+          .then(enableHighlightOnPointerMove)
+          .catch(signalerErreur);
+        guyaneView
+          .when(disableNavigation)
           .then(disablePopupOnClick)
-          .then(enableHighlightOnPointerMove);
-        akView
-          .then(disableNavigation)
+          .then(enableHighlightOnPointerMove)
+          .catch(signalerErreur);
+        reunionView
+          .when(disableNavigation)
           .then(disablePopupOnClick)
-          .then(enableHighlightOnPointerMove);
-        hiView
-          .then(disableNavigation)
-          .then(disablePopupOnClick)
-          .then(enableHighlightOnPointerMove);
+          .then(enableHighlightOnPointerMove)
+          .catch(signalerErreur);
+
+        // Voile de chargement retiré dès que la carte principale est prête
+        mainView.when(masquerChargement, masquerChargement);
+
+        // Dégradation gracieuse si la couche des départements ne répond plus :
+        // le fond de carte reste consultable et l'utilisateur est prévenu.
+        layer.when(null, function () {
+          signalerErreur();
+        });
+
+        function masquerChargement() {
+          var voile = document.getElementById("chargement");
+          if (voile && voile.parentNode) {
+            voile.parentNode.removeChild(voile);
+          }
+        }
+
+        function signalerErreur() {
+          masquerChargement();
+          if (document.getElementById("messageErreur")) {
+            return;
+          }
+          var bandeau = document.createElement("div");
+          bandeau.id = "messageErreur";
+          bandeau.setAttribute("role", "alert");
+          bandeau.textContent =
+            "Les données des départements sont momentanément indisponibles. Le fond de carte reste consultable.";
+          document.body.appendChild(bandeau);
+        }
 
         function maintainFixedExtent(view) {
-          var fixedExtent = view.extent.clone();
-          // keep a fixed extent in the view
-          // when the view size changes
-          view.on("resize", function () {
-            view.extent = fixedExtent;
-          });
+          // on recadre au lieu de reverrouiller l'emprise paysage :
+          // sur un écran étroit elle rendrait la France minuscule
+          function appliquerEmprise() {
+            view.extent = empriseAdaptee(view.width, view.height);
+            // un panneau ancré recouvrirait toute une fenêtre étroite
+            view.popup.dockEnabled = souris && view.width >= 768;
+          }
+
+          appliquerEmprise();
+          view.on("resize", appliquerEmprise);
           return view;
         }
 
-        let highlight = null;
-        let lastHighlight = null;
-        
-
         function enableHighlightOnPointerMove(view) {
           view.whenLayerView(layer).then(function (layerView) {
+            // l'identifiant se lit dans les métadonnées de la couche (ici FID),
+            // jamais en dur
+            var oidField = layer.objectIdField || "FID";
+
             view.on("pointer-move", function (event) {
-              view.hitTest(event).then(function (response) {
-                lastHighlight = highlight;
+              view
+                .hitTest(event)
+                .then(function (response) {
+                  lastHighlight = highlight;
 
-                // if a feature is returned, highlight it
-                // and display its attributes in the popup
-                // if no features are returned, then close the popup
-                var id = null;
+                  // if a feature is returned, highlight it
+                  // and display its attributes in the popup
+                  // if no features are returned, then close the popup
+                  var id = null;
 
-                if (response.results.length) {
-                  var feature = response.results.filter(function (result) {
+                  // on filtre AVANT de tester la longueur : un résultat venant
+                  // d'une autre couche donnerait un tableau vide
+                  var resultats = response.results.filter(function (result) {
                     return result.graphic.layer === layer;
-                  })[0].graphic;
+                  });
 
-                  feature.popupTemplate = layer.popupTemplate;
-                  id = feature.attributes.OBJECTID;
-                  highlight = layerView.highlight([id]);
-                  var selectionId = mainView.popup.selectedFeature
-                    ? mainView.popup.selectedFeature.attributes.OBJECTID
-                    : null;
+                  if (resultats.length) {
+                    var feature = resultats[0].graphic;
 
-                  if (highlight && id !== selectionId) {
-                    mainView.popup.open({
-                      features: [feature]
-                    });
+                    feature.popupTemplate = layer.popupTemplate;
+                    id = feature.attributes[oidField];
+                    highlight = layerView.highlight([id]);
+                    var selectionId = mainView.popup.selectedFeature
+                      ? mainView.popup.selectedFeature.attributes[oidField]
+                      : null;
+
+                    if (highlight && id !== selectionId) {
+                      mainView.popup.open({
+                        features: [feature]
+                      });
+                    }
+                  } else {
+                    highlight = null;
+                    if (mainView.popup.visible) {
+                      mainView.popup.close();
+                      if (mainView.popup.clear) {
+                        mainView.popup.clear();
+                      }
+                    }
                   }
-                } else {
-                  if (mainView.popup.visible) {
-                    mainView.popup.close();
-                    mainView.popup.clear();
-                  }
-                }
 
-                // remove the previous highlight
-                if (lastHighlight) {
-                  lastHighlight.remove();
-                  lastHighlight = null;
-                }
-              });
+                  // remove the previous highlight
+                  if (lastHighlight) {
+                    lastHighlight.remove();
+                    lastHighlight = null;
+                  }
+                })
+                .catch(function () {
+                  // un hitTest interrompu (survol rapide) ne doit pas
+                  // remonter en rejet non géré
+                });
             });
           });
+          return view;
         }
 
         // disables all navigation in the view
@@ -260,7 +476,7 @@ ymax: -2359801.2525520697,
               event.stopPropagation();
             }
           });
-          
+
 
           return view;
         }
@@ -278,8 +494,45 @@ ymax: -2359801.2525520697,
   </head>
 
   <body>
-    <div id="mainViewDiv"></div>
-    <div id="akViewDiv" class="esri-widget"></div>
-    <div id="hiViewDiv" class="esri-widget"></div>
+    <main>
+      <div
+        id="mainViewDiv"
+        role="application"
+        aria-label="Carte des départements français coloriés par région"
+      ></div>
+      <div id="guyaneCarton" class="carton esri-widget">
+        <div
+          id="guyaneViewDiv"
+          role="application"
+          aria-label="Carton : départements de Guyane"
+        ></div>
+        <span class="carton-label">Guyane</span>
+      </div>
+      <div id="reunionCarton" class="carton esri-widget">
+        <div
+          id="reunionViewDiv"
+          role="application"
+          aria-label="Carton : La Réunion"
+        ></div>
+        <span class="carton-label">La Réunion</span>
+      </div>
+    </main>
+
+    <div id="titreCarte" class="esri-widget">
+      <h1>Carte de France : départements et régions</h1>
+      <p>
+        Découpage administratif antérieur à la réforme régionale de 2016 —
+        source : Esri France, 2013
+      </p>
+    </div>
+
+    <div id="chargement">Chargement de la carte…</div>
+
+    <noscript>
+      <p class="noscript">
+        Cette carte nécessite JavaScript pour s'afficher. Activez-le puis
+        rechargez la page.
+      </p>
+    </noscript>
   </body>
 </html>
