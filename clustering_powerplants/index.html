@@ -2,12 +2,17 @@
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Centrales électriques mondiales — Clustering</title>
     <meta
-      name="viewport"
-      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+      name="description"
+      content="Carte des centrales électriques mondiales (base WRI) avec agrégation en clusters et filtrage par capacité installée."
     />
 
-<title>Filter clustered points with a slider - 4.14</title>
+    <link rel="preconnect" href="https://js.arcgis.com" />
+    <link rel="preconnect" href="https://basemaps.arcgis.com" />
+    <link rel="preconnect" href="https://services.arcgis.com" />
 
     <link
       rel="stylesheet"
@@ -27,6 +32,7 @@
       #infoDiv {
         padding: 10px;
         width: 275px;
+        max-width: calc(100vw - 90px);
       }
       #sliderValue {
         font-weight: bolder;
@@ -36,6 +42,63 @@
       }
       #description {
         padding: 10px 0 10px 0;
+      }
+      #loadingDiv,
+      #errorDiv {
+        padding: 10px 0;
+      }
+      /* Après le premier chargement, l'indicateur garde sa place pour que le
+         panneau ne saute pas à chaque recalcul des clusters */
+      #loadingDiv.reserved {
+        padding: 4px 0;
+        min-height: 1.2em;
+      }
+      #errorDiv {
+        color: #ffb4b4;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      /* Le curseur est focusable nativement : on rend le focus clavier visible */
+      .esri-slider__anchor:focus .esri-slider__thumb {
+        outline: 2px solid #ffffff;
+        outline-offset: 2px;
+      }
+      /* Contenu réservé aux lecteurs d'écran */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
+      /* Sur petit écran, l'Expand de la 4.14 s'ouvre en tiroir (sa propre règle
+         .esri-expand__container--expanded : width 75 %, max-width 300px, pleine
+         hauteur). Le panneau épouse donc ce tiroir au lieu d'imposer ses 275px ;
+         c'est l'état replié par défaut, plus bas, qui préserve la carte. */
+      @media (max-width: 600px) {
+        #infoDiv {
+          width: auto;
+          max-width: none;
+          padding: 8px;
+        }
+        #legendDiv {
+          width: auto;
+          max-height: 40vh;
+          overflow-y: auto;
+        }
+      }
+      /* Fenêtre peu haute (téléphone en paysage, petite fenêtre de bureau) :
+         la légende défile au lieu de déborder du panneau */
+      @media (max-height: 700px) {
+        #legendDiv {
+          max-height: 45vh;
+          overflow-y: auto;
+        }
       }
     </style>
 
@@ -48,114 +111,197 @@
         "esri/widgets/Slider",
         "esri/widgets/Expand"
       ], function(Map, MapView, FeatureLayer, Legend, Slider, Expand) {
+        // Bornes du filtre de capacité. Le maximum réel du jeu de données
+        // est de 8 868 MW : 2 000 MW est un plafond d'affichage, signalé
+        // comme tel par le libellé « 2000+ » au bout du curseur.
+        const CAPACITY_FIELD = "capacity_mw";
+        const CAPACITY_MIN = 0;
+        const CAPACITY_MAX = 2000;
+        const CAPACITY_STEP = 10;
+
+        // En dessous de cette largeur (px), le panneau de contrôle recouvrirait
+        // la carte : il démarre replié. Même seuil que la règle @media du CSS.
+        const PANEL_MIN_WIDTH = 600;
+
+        // Si la couche n'a pas chargé au bout de ce délai (ms), on prévient
+        // l'utilisateur au lieu de le laisser devant un « Chargement… » sans fin.
+        const LOAD_TIMEOUT_MS = 15000;
+
+        // Libellés français des filières (valeurs brutes du champ fuel1 du
+        // service). Source unique pour la légende et pour le popup de cluster.
+        const FUEL_LABELS = {
+          Hydro: "Hydraulique",
+          Solar: "Solaire",
+          Wind: "Éolien",
+          Oil: "Fioul",
+          Gas: "Gaz",
+          Coal: "Charbon",
+          Biomass: "Biomasse",
+          Waste: "Déchets",
+          Nuclear: "Nucléaire",
+          Geothermal: "Géothermie",
+          Cogeneration: "Cogénération",
+          Storage: "Stockage",
+          Petcoke: "Coke de pétrole",
+          "Wave and Tidal": "Houlomoteur et marémoteur",
+          Other: "Autre"
+        };
+
         // Configure clustering on the layer with a
         // popupTemplate displaying the predominant
         // fuel type of the power plants in the cluster
+
+        // Le champ agrégé cluster_type_fuel1 contient la valeur brute anglaise
+        // du service : on la traduit comme dans la légende.
+        function fuelLabel(value) {
+          return FUEL_LABELS[value] || value || "non renseigné";
+        }
 
         const clusterConfig = {
           type: "cluster",
           clusterRadius: "40px",
           popupTemplate: {
-            content: [
-              {
-                type: "text",
-                text: "Ce cluster représente <b>{cluster_count}</b> entités."
-              },
-              {
-                type: "text",
-                text:
-                  "Le type de combustible prédominant dans ce groupe de centrales est <b>{cluster_type_fuel1}</b>."
-              }
-            ]
+            title: "Groupe de centrales",
+            content: function(event) {
+              const attributes = event.graphic.attributes;
+              const count = Number(attributes.cluster_count);
+              return (
+                "<p>Ce cluster représente <b>" +
+                (isNaN(count) ? attributes.cluster_count : count.toLocaleString("fr-FR")) +
+                "</b> entités.</p>" +
+                "<p>Le type de combustible prédominant dans ce groupe de centrales est <b>" +
+                fuelLabel(attributes.cluster_type_fuel1) +
+                "</b>.</p>"
+              );
+            }
           }
         };
 
-        
         const layer = new FeatureLayer({
           portalItem: {
             id: "26439088e1fc43078383c75bfbd7dbe6"
           },
           featureReduction: clusterConfig
         });
-        
-          var renderer = {
-  type: "unique-value",  // autocasts as new UniqueValueRenderer()
-  field: "fuel1",
-  defaultSymbol: {    
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyA5.png'
-},  // autocasts as new SimpleFillSymbol()
-  uniqueValueInfos: [{
-    // All features with value of "North" will be blue
-    value: "Hydro",
-    symbol: {
-      type: "picture-marker",  // autocasts as new PictureMarkerSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyC8.png'
-    }
-  }, {
-    value: "Solar",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyC17.png'
-    }
-  }, {
-    value: "Wind",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyC14.png'
-    }
-  }, {
-    value: "Oil",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyE20.png', //E2
-	  width:"26px",
-	  height:"26px",
-	}
-  },{
-    value: "Gas",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyE9.png',
-	  width:"26px",
-	  height:"26px",
-    }
-  },{
-    value: "Coal",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyD20.png'
-    }
-  },{
-    value: "Biomass",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyC15.png'
-    }
-  },{
-    value: "Waste",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyC20.png'
-    }
-  },{
-    value: "Nuclear",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyC3.png',
-	  width:"30px",
-	  height:"30px",
-    }
-  },{
-    value: "Geothermal",
-    symbol: {
-      type: "picture-marker",  // autocasts as new SimpleFillSymbol()
-      url: 'https://static.arcgis.com/images/Symbols/Firefly/FireflyE18.png'
-    }
-  }]
-};
-          
-          layer.renderer = renderer;
+
+        // Le titre hérité de l'item de portail (« Centrales en Europe ») est
+        // faux : la base WRI est mondiale. On le surcharge pour la légende.
+        layer.title = "Centrales électriques (monde)";
+
+        const renderer = {
+          type: "unique-value", // autocasts as new UniqueValueRenderer()
+          field: "fuel1",
+          legendOptions: {
+            title: "Filière principale"
+          },
+          // 5 filières du service (Cogeneration, Other, Petcoke, Storage,
+          // Wave and Tidal) retombent sur le symbole par défaut : on les nomme.
+          defaultLabel: "Autres (cogénération, stockage, houlomoteur…)",
+          defaultSymbol: {
+            type: "picture-marker", // autocasts as new PictureMarkerSymbol()
+            url: "https://static.arcgis.com/images/Symbols/Firefly/FireflyA5.png"
+          },
+          uniqueValueInfos: [
+            {
+              value: "Hydro",
+              label: FUEL_LABELS.Hydro,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyC8.png"
+              }
+            },
+            {
+              value: "Solar",
+              label: FUEL_LABELS.Solar,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyC17.png"
+              }
+            },
+            {
+              value: "Wind",
+              label: FUEL_LABELS.Wind,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyC14.png"
+              }
+            },
+            {
+              value: "Oil",
+              label: FUEL_LABELS.Oil,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyE20.png",
+                width: "26px",
+                height: "26px"
+              }
+            },
+            {
+              value: "Gas",
+              label: FUEL_LABELS.Gas,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyE9.png",
+                width: "26px",
+                height: "26px"
+              }
+            },
+            {
+              value: "Coal",
+              label: FUEL_LABELS.Coal,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyD20.png"
+              }
+            },
+            {
+              value: "Biomass",
+              label: FUEL_LABELS.Biomass,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyC15.png"
+              }
+            },
+            {
+              value: "Waste",
+              label: FUEL_LABELS.Waste,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyC20.png"
+              }
+            },
+            {
+              value: "Nuclear",
+              label: FUEL_LABELS.Nuclear,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyC3.png",
+                width: "30px",
+                height: "30px"
+              }
+            },
+            {
+              value: "Geothermal",
+              label: FUEL_LABELS.Geothermal,
+              symbol: {
+                type: "picture-marker",
+                url:
+                  "https://static.arcgis.com/images/Symbols/Firefly/FireflyE18.png"
+              }
+            }
+          ]
+        };
+
+        layer.renderer = renderer;
 
         const map = new Map({
           basemap: {
@@ -169,16 +315,10 @@
         const view = new MapView({
           container: "viewDiv",
           map: map,
-          extent: {
-            spatialReference: {
-              latestWkid: 3857,
-              wkid: 102100
-            },
-            xmin: -42087672,
-            ymin: 4108613,
-            xmax: -36095009,
-            ymax: 8340167
-          }
+          // Cadrage mondial lisible (la donnée WRI couvre les cinq continents),
+          // en remplacement des coordonnées Web Mercator hors bornes d'origine
+          center: [10, 20],
+          zoom: 2
         });
 
         const legend = new Legend({
@@ -187,72 +327,265 @@
         });
 
         const infoDiv = document.getElementById("infoDiv");
-        view.ui.add(
-          new Expand({
-            view: view,
-            content: infoDiv,
-            expandIconClass: "esri-icon-layer-list",
-            expanded: true
-          }),
-          "top-right"
-        );
-
+        const loadingDiv = document.getElementById("loadingDiv");
+        const errorDiv = document.getElementById("errorDiv");
+        const descriptionDiv = document.getElementById("description");
+        const sliderContainer = document.getElementById("sliderContainer");
+        const sliderValue = document.getElementById("sliderValue");
         const toggleButton = document.getElementById("toggleCluster");
+
+        // Le panneau n'est déplié d'office que si l'écran est assez large :
+        // en dessous il masquerait la carte. Seuil aligné sur celui du CSS,
+        // et évalué tout de suite (sans attendre view.when) pour que l'état
+        // du panneau ne dépende pas du chargement de la carte.
+        const expand = new Expand({
+          view: view,
+          content: infoDiv,
+          expandIconClass: "esri-icon-layer-list",
+          expanded: window.innerWidth >= PANEL_MIN_WIDTH
+        });
+        view.ui.add(expand, "top-right");
+
+        // Affichage d'un message honnête si la couche de données ne charge pas,
+        // au lieu d'un panneau muet avec des contrôles inertes.
+        let dataFailed = false;
+        function showDataError(error) {
+          if (dataFailed) {
+            return;
+          }
+          dataFailed = true;
+          console.error("Chargement de la couche des centrales impossible", error);
+          loadingDiv.hidden = true;
+          descriptionDiv.hidden = true;
+          sliderContainer.hidden = true;
+          errorDiv.hidden = false;
+          toggleButton.disabled = true;
+        }
+
+        // Réseau simplement lent : la couche finit par arriver après le délai
+        // d'alerte, on rend la main à l'utilisateur.
+        function clearDataError() {
+          if (!dataFailed) {
+            return;
+          }
+          dataFailed = false;
+          errorDiv.hidden = true;
+          toggleButton.disabled = false;
+          loadingDiv.hidden = false;
+        }
+
+        // En 4.14, layer.load() ne rejette qu'au bout de ses propres tentatives
+        // (une trentaine de secondes) : sans ce garde-fou l'utilisateur reste
+        // devant un « Chargement… » indiscernable d'un chargement normal.
+        const loadTimeout = setTimeout(function() {
+          if (!layer.loaded) {
+            showDataError(new Error("délai de chargement dépassé"));
+          }
+        }, LOAD_TIMEOUT_MS);
+
+        layer
+          .load()
+          .then(function() {
+            clearTimeout(loadTimeout);
+            clearDataError();
+          })
+          .catch(function(error) {
+            clearTimeout(loadTimeout);
+            showDataError(error);
+          });
+
+        let clusteringActive = true;
         toggleButton.addEventListener("click", toggleClustering);
 
         // To turn off clustering on a layer, set the
         // featureReduction property to null
         function toggleClustering() {
-          let fr = layer.featureReduction;
-          layer.featureReduction =
-            fr && fr.type === "cluster" ? null : clusterConfig;
-          toggleButton.innerText =
-            toggleButton.innerText === "Autoriser le Clustering"
-              ? "Désactiver le Clustering"
-              : "Autoriser le Clustering";
+          clusteringActive = !clusteringActive;
+          layer.featureReduction = clusteringActive ? clusterConfig : null;
+          toggleButton.innerText = clusteringActive
+            ? "Désactiver le Clustering"
+            : "Autoriser le Clustering";
+          toggleButton.setAttribute("aria-pressed", String(clusteringActive));
         }
 
-        view.whenLayerView(layer).then(function(layerView) {
-          const field = "capacity_mw";
+        view
+          .whenLayerView(layer)
+          .then(function(layerView) {
+            clearTimeout(loadTimeout);
+            clearDataError();
+            descriptionDiv.hidden = false;
+            sliderContainer.hidden = false;
 
-          const slider = new Slider({
-            min: 0,
-            max: 2000,
-            values: [0],
-            container: document.getElementById("sliderDiv"),
-            rangeLabelsVisible: true,
-            precision: 0
-          });
+            // L'indicateur reste affiché tant que la couche interroge le
+            // service et recalcule ses clusters (plusieurs secondes au
+            // premier affichage), puis sert d'indicateur discret de mise à jour.
+            let firstLoadDone = false;
+            function markFirstLoadDone() {
+              if (firstLoadDone) {
+                return;
+              }
+              firstLoadDone = true;
+              // Évite qu'un lecteur d'écran réannonce chaque recalcul
+              loadingDiv.removeAttribute("role");
+              loadingDiv.innerText = "Mise à jour…";
+              // Place réservée : le panneau ne bouge plus pendant les recalculs
+              loadingDiv.hidden = false;
+              loadingDiv.classList.add("reserved");
+              loadingDiv.style.visibility = "hidden";
+            }
 
-          const sliderValue = document.getElementById("sliderValue");
+            if (!layerView.updating) {
+              markFirstLoadDone();
+            }
+            layerView.watch("updating", function(updating) {
+              if (dataFailed) {
+                return;
+              }
+              if (!updating) {
+                markFirstLoadDone();
+              }
+              if (firstLoadDone) {
+                loadingDiv.style.visibility = updating ? "visible" : "hidden";
+              }
+            });
 
-          // filter features by power plant capacity when the user
-          // drags the slider thumb. If clustering is enabled,
-          // clusters will recompute and render based on the number
-          // and type of features that satisfy the filter where clause
+            const slider = new Slider({
+              min: CAPACITY_MIN,
+              max: CAPACITY_MAX,
+              values: [CAPACITY_MIN],
+              container: document.getElementById("sliderDiv"),
+              rangeLabelsVisible: true,
+              precision: 0,
+              // Le maximum du curseur est un plafond d'affichage, pas le
+              // maximum du jeu de données : le libellé de droite le signale.
+              labelFormatFunction: function(value, type) {
+                return type === "max" ? value + "+" : String(value);
+              }
+            });
 
-          slider.on(["thumb-change", "thumb-drag"], function(event) {
-            sliderValue.innerText = event.value;
-            layerView.filter = {
-              where: field + " >= " + event.value
-            };
-          });
-        });
+            // filter features by power plant capacity when the user
+            // drags the slider thumb. If clustering is enabled,
+            // clusters will recompute and render based on the number
+            // and type of features that satisfy the filter where clause
+
+            function applyCapacity(value) {
+              sliderValue.innerText = value;
+              layerView.filter = {
+                where: CAPACITY_FIELD + " >= " + value
+              };
+              labelSliderAnchor();
+            }
+
+            slider.on(["thumb-change", "thumb-drag"], function(event) {
+              applyCapacity(event.value);
+            });
+
+            // Le curseur de la 4.14 est déjà accessible nativement : son ancre
+            // porte role="slider", tabindex="0" et les aria-value*, tenus à jour
+            // par le widget. On ne surcharge donc que le libellé, « Valeur du
+            // curseur » par défaut ne disant pas ce que le curseur règle.
+            // Réappliqué après chaque changement au cas où le widget re-rende
+            // son ancre, mais sans écriture DOM inutile.
+            const SLIDER_LABEL = "Capacité minimale des centrales, en mégawatts";
+            let sliderAnchor = null;
+
+            function labelSliderAnchor() {
+              if (!sliderAnchor && slider.container) {
+                sliderAnchor = slider.container.querySelector(
+                  ".esri-slider__anchor"
+                );
+              }
+              if (
+                sliderAnchor &&
+                sliderAnchor.getAttribute("aria-label") !== SLIDER_LABEL
+              ) {
+                sliderAnchor.setAttribute("aria-label", SLIDER_LABEL);
+              }
+            }
+
+            function setCapacityFromKeyboard(value) {
+              const bounded = Math.min(
+                CAPACITY_MAX,
+                Math.max(CAPACITY_MIN, value)
+              );
+              slider.values = [bounded];
+              applyCapacity(bounded);
+            }
+
+            // Délégation sur le conteneur, en phase de capture : on neutralise
+            // le déplacement interne du widget (pas irrégulier de ~14 MW, soit
+            // un centième de la plage) pour obtenir un pas rond de 10 MW.
+            document.getElementById("sliderDiv").addEventListener(
+              "keydown",
+              function(event) {
+                const current = slider.values[0];
+                let next = current;
+                switch (event.key) {
+                  case "ArrowRight":
+                  case "ArrowUp":
+                    next = current + CAPACITY_STEP;
+                    break;
+                  case "ArrowLeft":
+                  case "ArrowDown":
+                    next = current - CAPACITY_STEP;
+                    break;
+                  case "PageUp":
+                    next = current + CAPACITY_STEP * 10;
+                    break;
+                  case "PageDown":
+                    next = current - CAPACITY_STEP * 10;
+                    break;
+                  case "Home":
+                    next = CAPACITY_MIN;
+                    break;
+                  case "End":
+                    next = CAPACITY_MAX;
+                    break;
+                  default:
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                setCapacityFromKeyboard(next);
+              },
+              true
+            );
+
+            // L'ancre n'existe qu'après le premier rendu du widget
+            (function waitForAnchor(tries) {
+              labelSliderAnchor();
+              if (sliderAnchor || tries > 60) {
+                return;
+              }
+              requestAnimationFrame(function() {
+                waitForAnchor(tries + 1);
+              });
+            })(0);
+          })
+          .catch(showDataError);
       });
     </script>
   </head>
 
   <body>
+    <h1 class="sr-only">Centrales électriques mondiales — carte avec clustering</h1>
     <div id="viewDiv"></div>
     <div id="infoDiv" class="esri-widget">
-      <button id="toggleCluster" class="esri-button">Désactiver le Clustering</button>
-      <div id="description">
+      <button id="toggleCluster" class="esri-button" aria-pressed="true">
+        Désactiver le Clustering
+      </button>
+      <div id="errorDiv" role="alert" hidden>
+        Les données des centrales électriques sont momentanément indisponibles.
+        La carte de fond reste consultable.
+      </div>
+      <div id="description" hidden>
         Montrer les centrales avec au moins
         <span id="sliderValue">0</span> megawatts de capacité
       </div>
-      <div id="sliderContainer">
+      <div id="sliderContainer" hidden>
         <div id="sliderDiv"></div>
       </div>
+      <div id="loadingDiv" role="status">Chargement des centrales électriques…</div>
       <div id="legendDiv"></div>
     </div>
   </body>
