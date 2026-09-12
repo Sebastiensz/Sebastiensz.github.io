@@ -1,9 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!--
   ArcGIS API for JavaScript, https://js.arcgis.com
   For more information about the widgets-timeslider sample, read the original sample description at developers.arcgis.com.
@@ -11,14 +11,17 @@
 url des donnees https://ourworldindata.org/coronavirus-source-data
 css : https://developers.arcgis.com/javascript/latest/guide/styling/
   -->
-  <title>Evolution du nombre de vaccinés contre la Covid-19 dans le monde"</title>
+  <title>Évolution du nombre de vaccinés contre la Covid-19 dans le monde</title>
 
+  <!-- Langue des widgets Esri (curseur temporel, recherche, popup) alignée sur le lang="fr" de la page -->
+  <script>var dojoConfig = { locale: "fr" };</script>
   <link rel="stylesheet" href="https://js.arcgis.com/4.14/esri/themes/dark/main.css" />
   <script src="https://js.arcgis.com/4.14/"></script>
 
   <style>
     html,
     body,
+    main,
     #viewDiv {
       padding: 0;
       margin: 0;
@@ -31,6 +34,7 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       left: 100px;
       right: 100px;
       bottom: 20px;
+      z-index: 0; /* contexte d'empilement : le curseur ne transparaît plus à travers le popup ancré (mobile) */
     }
 
     #titleDiv {
@@ -39,7 +43,13 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       text-align: center;
       font-size: 20px;
     }
-    
+
+    #titleDiv h1 {
+      margin: 0;
+      font-size: inherit;
+      font-weight: inherit;
+    }
+
     #source {
       padding: 10px;
       font-weight: normal;
@@ -50,8 +60,74 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       bottom: 120px;
       width:160px;
       }
-    #logoDiv {
-      border: 0px dotted red;
+
+    #source a {
+      color: rgb(107,236,87);
+      text-decoration: underline;
+    }
+
+    #source .nowrap {
+      white-space: nowrap;
+    }
+
+    /* Bandeau d'état (chargement dès le premier rendu, puis erreur éventuelle) : masqué quand il est vide */
+    #messageDiv {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      max-width: 320px;
+      padding: 10px 14px;
+      text-align: center;
+      font-size: 13px;
+    }
+
+    #messageDiv:empty {
+      display: none;
+    }
+
+    #messageDiv.error {
+      color: #f9b4b4;
+      font-weight: bold;
+    }
+
+    /* La légende dépliée ne doit pas déborder sous le curseur temporel : le widget Expand
+       calcule sa hauteur maxi sur toute la vue (style inline), d'où le !important. */
+    .esri-ui-top-left .esri-expand__content,
+    .esri-ui-top-left .esri-legend {
+      max-height: calc(100vh - 310px) !important;
+      overflow-y: auto;
+    }
+
+    /* Mobile (breakpoints xsmall / small) : titre, curseur temporel et source restent affichés */
+    @media (max-width: 768px) {
+      #timeSlider {
+        left: 10px;
+        right: 10px;
+        bottom: 20px;
+      }
+
+      #titleDiv {
+        font-size: 14px;
+        max-width: calc(100vw - 155px);
+      }
+
+      #logoDiv img {
+        width: 110px;
+      }
+
+      #source {
+        bottom: 185px;
+        font-size: 11px;
+      }
+
+      #source p {
+        margin: 0 0 6px;
+      }
+
+      #messageDiv {
+        max-width: calc(100vw - 40px);
+      }
     }
   </style>
 
@@ -65,11 +141,63 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       "esri/widgets/Expand",
       "esri/widgets/Legend",
       "esri/widgets/Search",
-      "esri/widgets/Zoom",
       "esri/widgets/Home",
       "esri/widgets/Bookmarks",
       "esri/webmap/Bookmark"
-    ], function (Map, MapView, FeatureLayer, TimeSlider, Expand, Legend, Search, Zoom, Home, Bookmarks, Bookmark) {
+    ], function (Map, MapView, FeatureLayer, TimeSlider, Expand, Legend, Search, Home, Bookmarks, Bookmark) {
+
+      // Bornes réelles des données (vérifiées sur le service) : le timeInfo déclaré par le service
+      // commence au 01/01/2020 alors que la première vaccination enregistrée date du 13/12/2020.
+      // Valeurs de secours si la requête de statistiques (min/max de date_) échoue.
+      var DATA_START = new Date(Date.UTC(2020, 11, 13));
+      var DATA_END = new Date(Date.UTC(2021, 10, 26));
+      // Délai maxi d'attente du chargement des entités avant de lancer la lecture quoi qu'il arrive
+      var LOAD_TIMEOUT_MS = 60000;
+      // Seuls champs utilisés par le rendu et par le popup (les autres ne sont pas rapatriés)
+      var POPUP_FIELDS = ["SHORT_NAME", "date_", "total_vaccinatio", "total_vaccinat_1"];
+
+      // Échelle de couleur commune au rendu desktop et au rendu mobile : un même pays a donc la
+      // même couleur sur les deux supports. Fonction (et non variable) pour que chaque rendu
+      // reçoive son propre objet, l'API le transformant en instance lors de l'autocast.
+      function colorVariable() {
+        return {
+          type: "color",
+          field: "total_vaccinat_1",
+          legendOptions: {
+            title: "Taux de vaccinés contre la Covid-19"
+          },
+          stops: [
+            {value: 120,
+            color: [11,92,31, 0.8],
+            label: "120 % de vaccinés (taux rapporté aux résidents, non-résidents inclus)"
+          },{
+            value: 100,
+            color: [25,128,49, 0.8], //"#B03A2E"
+            label: "100 % de vaccinés dans le pays"
+          },{
+            value: 70,
+            color: [21,146,42, 0.8], //"#B03A2E"
+            label: "70 % de vaccinés dans le pays"
+          },{
+            value: 40,
+            color: [35,176,57, 0.8], //"#B03A2E"
+            label: "40 % de vaccinés dans le pays"
+          },{
+            value: 15,
+            color: [49,192,73, 0.8], //"#B03A2E"
+            label: "15 % de vaccinés dans le pays"
+          }, {
+            value: 5,
+            color: [108,205,124, 0.8], //"#CB4335"
+            label: "5 % de vaccinés dans le pays"
+          }, {
+            value: 0.05,
+            color: [141,222,154, 0.8], //"#EC7063"
+            label: "0,05 % de vaccinés dans le pays"
+          }
+          ]
+        };
+      }
 
       var renderer = {
         type: "simple",
@@ -83,39 +211,7 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
           }
         },
         visualVariables: [
-          {
-            type: "color",
-            field: "total_vaccinat_1",
-            legendOptions: {
-              title: "Taux de vaccinés contre la Covid-19"
-            },
-            stops: [
-              {value: 100,
-              color: [25,128,49, 0.8], //"#B03A2E"
-              label: "100 % de vaccinés dans le pays"
-            },{
-              value: 70,
-              color: [21,146,42, 0.8], //"#B03A2E"
-              label: "70 % de vaccinés dans le pays"
-            },{
-              value: 40,
-              color: [35,176,57, 0.8], //"#B03A2E"
-              label: "40 % de vaccinés dans le pays"
-            },{
-              value: 15,
-              color: [49,192,73, 0.8], //"#B03A2E"
-              label: "15 % de vaccinés dans le pays"
-            }, {
-              value: 5,
-              color: [108,205,124, 0.8], //"#CB4335"
-              label: "5 % de vaccinés dans le pays"
-            }, {
-              value: 1,
-              color: [141,222,154, 0.8], //"#EC7063"
-              label: "0,05 % de vaccinés dans le pays"
-            }
-            ]
-          },
+          colorVariable(),
           {
             type: "size",
             field: "total_vaccinatio",
@@ -123,6 +219,9 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
               title: "Total des vaccinés Covid-19 dans le pays"
             },
             stops: [{
+                value:1100000000 ,
+                size: "128px"
+              },{
                 value:500000000 ,
                 size: "112px"
               },{
@@ -136,10 +235,7 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
                 size: "24px"
               }, {
                 value:500000 ,
-                size: "12px"},
-              {
-                value:0,
-                size:"0px"}
+                size: "12px"}
             ]
           }
         ]
@@ -147,14 +243,16 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
 
 
       var layer = new FeatureLayer({
-        //url: "https://services.arcgis.com/d3voDfTFbHOCRwVR/arcgis/rest/services/data_full_covid19/FeatureServer/0",
         url:"https://services.arcgis.com/d3voDfTFbHOCRwVR/arcgis/rest/services/COVID19_centroids_country_vaccin/FeatureServer/0",
+        // Le service contient une seconde série, en doublon et entièrement à 0, pour le Danemark,
+        // la Norvège et la Lettonie : elle faisait disparaître ces pays en fin d'animation.
+        definitionExpression: "total_vaccinatio > 0",
+        outFields: POPUP_FIELDS,
         renderer: renderer
       });
-	  
+
 
       const map = new Map({
-        //basemap: "satellite",
         basemap: "dark-gray",
         layers: [layer]
       });
@@ -178,59 +276,184 @@ view.popup.collapseEnabled= false;
           {
             type: "text",
             text:
-              "{SHORT_NAME}: Il y a {total_vaccinatio} personnes complètement vaccinnées contre la Covid-19 le {date_} selon les derniers chiffres connus à ce jour. Sur l'ensemble de la population cela représente {total_vaccinat_1} %. "
+              "{SHORT_NAME} : il y a {total_vaccinatio} personnes complètement vaccinées contre la Covid-19 le {date_}. Sur l'ensemble de la population cela représente {total_vaccinat_1} % (personnes complètement vaccinées rapportées à la population résidente : le taux peut dépasser 100 % lorsque des non-résidents sont vaccinés)."
           },
           {
-            type: "fields",
-            fieldInfos: [
-              {
-                fieldName: "total_vaccinatio",
-                label: "Nombre de vaccinés",
-                format: {
-                  digitSeparator: true,
-                  places: 0
-                }
-              },
-              {
-                fieldName: "total_vaccinat_1",
-                label: "Taux de vaccinés %",
-                format: {
-                  digitSeparator: true,
-                  places: 3
-                }
-              }
-            ]
+            type: "fields"
+          }
+        ],
+        // Formats utilisés à la fois par le tableau de champs et par les {champs} du texte
+        fieldInfos: [
+          {
+            fieldName: "date_",
+            label: "Date",
+            format: {
+              dateFormat: "short-date"
+            }
+          },
+          {
+            fieldName: "total_vaccinatio",
+            label: "Nombre de vaccinés",
+            format: {
+              digitSeparator: true,
+              places: 0
+            }
+          },
+          {
+            fieldName: "total_vaccinat_1",
+            label: "Taux de vaccinés %",
+            format: {
+              digitSeparator: true,
+              places: 1
+            }
           }
         ]
       };
 
       layer.popupTemplate = template;
 
+      // En 4.14 le filtre temporel posé sur le layerView ne s'applique qu'à l'affichage, pas à la
+      // sélection du popup : un clic renvoyait toute la série du pays (jusqu'à 710 dates paginées).
+      // On désactive donc le popup automatique de la couche et on n'ouvre que l'entité réellement
+      // dessinée sous le clic, c'est-à-dire celle de la date affichée par le curseur.
+      layer.popupEnabled = false;
+
+      view.on("click", function (event) {
+        view.hitTest(event).then(function (response) {
+          var hits = (response.results || []).filter(function (result) {
+            return result.graphic && result.graphic.layer === layer;
+          });
+          if (!hits.length) {
+            view.popup.close();
+            return;
+          }
+          var graphic = hits[0].graphic;
+          var attributes = graphic.attributes || {};
+          var objectId = attributes[layer.objectIdField];
+          var query = layer.createQuery();
+          query.outFields = POPUP_FIELDS;
+          query.returnGeometry = true;
+          if (objectId !== undefined && objectId !== null) {
+            query.objectIds = [objectId];
+          } else {
+            // Repli : le point cliqué, restreint à la date affichée par le curseur
+            query.geometry = graphic.geometry;
+            query.timeExtent = timeSlider.timeExtent;
+          }
+          return layer.queryFeatures(query).then(function (result) {
+            var features = result.features || [];
+            if (!features.length) {
+              view.popup.close();
+              return;
+            }
+            features.forEach(function (feature) {
+              feature.popupTemplate = template;
+            });
+            view.popup.open({
+              features: features,
+              location: features[0].geometry || event.mapPoint
+            });
+          });
+        }).catch(function (err) {
+          console.error("Lecture de l'entité impossible", err);
+        });
+      });
+
       const timeSlider = new TimeSlider({
         container: "timeSlider",
         mode: "instant",
-        view: view
+        view: view,
+        loop: false,
+        playRate: 160
       });
       view.ui.add(timeSlider, "manual");
-      let timeLayerView;
-      view.whenLayerView(layer).then(function (lv) {
-        timeLayerView = lv;
-        const fullTimeExtent = layer.timeInfo.fullTimeExtent;
 
-        timeSlider.fullTimeExtent = fullTimeExtent;
+      var messageDiv = document.getElementById("messageDiv");
+      view.ui.add("messageDiv", "manual");
+
+      // Affiche un message d'état au centre de la carte (texte vide = masqué)
+      function showMessage(text, isError) {
+        messageDiv.textContent = text;
+        messageDiv.classList.toggle("error", !!isError);
+        // Une indisponibilité doit être annoncée immédiatement par les lecteurs d'écran
+        messageDiv.setAttribute("role", isError ? "alert" : "status");
+      }
+
+      function formatDate(date) {
+        return date.toLocaleDateString("fr-FR", { timeZone: "UTC" });
+      }
+
+      // Applique l'étendue temporelle au curseur (pas journalier) et le cale sur la date "value"
+      function setTimeRange(start, end, value) {
+        timeSlider.fullTimeExtent = { start: start, end: end };
         timeSlider.stops = {
           interval: {
             value: 1,
             unit: "days"
           },
-          timeExtent: {
-            start: fullTimeExtent.start,//1579564800000,
-            end: fullTimeExtent.end//1584403200000
-          }
+          timeExtent: { start: start, end: end }
+        };
+        timeSlider.values = [value];
+        var periodEl = document.getElementById("periodText");
+        if (periodEl) {
+          periodEl.textContent = formatDate(start) + " au " + formatDate(end);
         }
-        
-              timeSlider.play();
-        
+      }
+
+      let timeLayerView;
+      view.whenLayerView(layer).then(function (lv) {
+        timeLayerView = lv;
+
+        // Bornes connues appliquées tout de suite : le filtre temporel est en place avant le premier rendu
+        var declaredExtent = layer.timeInfo && layer.timeInfo.fullTimeExtent;
+        setTimeRange(DATA_START, declaredExtent ? declaredExtent.end : DATA_END, DATA_START);
+
+        // Bornes réelles des données (min/max de date_) : le timeInfo déclaré par le service
+        // commence 11 mois avant la première donnée, ce qui laissait la carte vide pendant ~1 min
+        var statsQuery = layer.createQuery();
+        statsQuery.outStatistics = [
+          { statisticType: "min", onStatisticField: "date_", outStatisticFieldName: "mind" },
+          { statisticType: "max", onStatisticField: "date_", outStatisticFieldName: "maxd" }
+        ];
+        var boundsReady = layer.queryFeatures(statsQuery).then(function (result) {
+          var attrs = result.features.length ? result.features[0].attributes : null;
+          if (attrs && attrs.mind && attrs.maxd) {
+            setTimeRange(new Date(attrs.mind), new Date(attrs.maxd), new Date(attrs.mind));
+          }
+        }).catch(function () {
+          // Bornes de secours conservées
+        });
+
+        // Lecture lancée seulement quand les entités sont chargées (plus de carte vide sans explication)
+        var featuresReady = new Promise(function (resolve) {
+          if (!lv.updating) {
+            resolve();
+            return;
+          }
+          var timer = setTimeout(resolve, LOAD_TIMEOUT_MS);
+          var handle = lv.watch("updating", function (updating) {
+            if (!updating) {
+              clearTimeout(timer);
+              handle.remove();
+              resolve();
+            }
+          });
+        });
+
+        Promise.all([boundsReady, featuresReady]).then(function () {
+          showMessage("");
+          // Lecture automatique, sauf si l'utilisateur l'a déjà lancée pendant le chargement
+          if (timeSlider.viewModel.state !== "playing") {
+            timeSlider.play();
+          }
+        });
+      }).catch(function (err) {
+        console.error("Couche de vaccination injoignable", err);
+        view.ui.remove(timeSlider);
+        // État d'erreur cohérent : ni période annoncée, ni bouton vers une légende vide
+        view.ui.remove(legendExpand);
+        document.getElementById("periodSentence").textContent = "Période des données indisponible.";
+        showMessage("Données de vaccination indisponibles (service ArcGIS Online injoignable).", true);
       });
 
       timeSlider.watch("timeExtent", function(value){
@@ -240,27 +463,12 @@ view.popup.collapseEnabled= false;
         };
       });
 
-      timeSlider.set({
-        loop: false,
-        playRate: 160
-      });
-
-      view.ui.remove("zoom");
-
       view.ui.add("titleDiv", {
         position: "top-left",
-        index: 1
+        index: 0
       });
-      
+
       view.ui.add("source","manual");
-      
-      const zoom = new Zoom({
-        view: view
-      });
-      view.ui.add(zoom, {
-        position: "top-left",
-        index: 2
-      });
 
       const searchWidget = new Search({
         view: view
@@ -271,7 +479,7 @@ view.popup.collapseEnabled= false;
         position: "top-right",
         index: 1
       });
-      
+
       view.ui.add("logoDiv", "top-right");
 
       const bookmarks = new Bookmarks({
@@ -365,17 +573,17 @@ view.popup.collapseEnabled= false;
         }]
       });
       const legendExpand = new Expand({
-        expandIconClass: "esri-icon-drag-horizontal",
-        expandTooltip: "Legend",
+        expandIconClass: "esri-icon-layer-list",
+        expandTooltip: "Légende",
         view: view,
         expanded: false,
         content: legend,
       });
       view.ui.add(legendExpand, "top-left");
-	  
-	  
-      //Config du nouveau renderer 
-      			var renderer2 = {
+
+
+      //Config du nouveau renderer (mobile : symboles plus petits)
+      var renderer2 = {
         type: "simple",
         symbol: {
           type: "simple-marker", // autocasts as new SimpleMarkerSymbol()
@@ -387,39 +595,7 @@ view.popup.collapseEnabled= false;
           }
         },
         visualVariables: [
-          {
-            type: "color",
-            field: "total_vaccinat_1",
-            legendOptions: {
-              title: "Taux de vaccinés contre la Covid-19"
-            },
-            stops: [
-              {value: 20,
-              color: [25,128,49, 0.8], //"#B03A2E"
-              label: "20 % de vaccinés dans le pays"
-            },{
-              value: 10,
-              color: [21,146,42, 0.8], //"#B03A2E"
-              label: "10 % de vaccinés dans le pays"
-            },{
-              value: 5,
-              color: [35,176,57, 0.8], //"#B03A2E"
-              label: "5 % de vaccinés dans le pays"
-            },{
-              value: 3,
-              color: [49,192,73, 0.8], //"#B03A2E"
-              label: "3 % de vaccinés dans le pays"
-            }, {
-              value: 1,
-              color: [108,205,124, 0.8], //"#CB4335"
-              label: "1 % de vaccinés dans le pays"
-            }, {
-              value: 1,
-              color: [141,222,154, 0.8], //"#EC7063"
-              label: "0,05 % de vaccinés dans le pays"
-            }
-            ]
-          },
+          colorVariable(),
           {
             type: "size",
             field: "total_vaccinatio",
@@ -431,83 +607,42 @@ view.popup.collapseEnabled= false;
                 size: "54px"
               },{
                 value:1,
-                size:"1px"},
-              {
-                value:0,
-                size:"0px"}
+                size:"1px"}
             ]
           }
         ]
       };
-      
-      
-      
-	  
+
+
+      // Mise en page mobile (breakpoints xsmall et small) : rendu compact et retrait de la recherche
+      // uniquement ; le titre, le curseur temporel et la source restent affichés (voir la media query CSS).
+      // Au retour en desktop on restaure la recherche et le rendu d'origine.
+      var mobileLayout = false;
       function updateView(isMobile) {
-        setTitleMobile(isMobile);
-        setScaleBarWidgetMobile(isMobile);
+        if (isMobile === mobileLayout) return;
+        mobileLayout = isMobile;
+        if (isMobile) {
+          layer.renderer = renderer2;
+          view.ui.remove(searchWidget);
+        } else {
+          layer.renderer = renderer;
+          view.ui.add(searchWidget, {
+            position: "top-right",
+            index: 1
+          });
         }
+      }
 
-        function setTitleMobile(isMobile) {
-            if (isMobile) {
-              layer.renderer=renderer2
-              view.ui.remove(titleDiv);
-              view.ui.remove(searchWidget);
-              view.ui.remove(source);
-              view.ui.remove(timeSlider);
-            } else {
-                view.ui.add(titleDiv, {
-                    position: "top-left",
-                    index: 0
-                });
-				view.ui.add(timeSlider, "manual");
-            }
-			
-			
-        }
+      function isMobileBreakpoint(breakpoint) {
+        return breakpoint === "xsmall" || breakpoint === "small";
+      }
 
+      updateView(isMobileBreakpoint(view.widthBreakpoint));
 
-
-        function setScaleBarWidgetMobile(isMobile) {
-            if (isMobile) {
-            } else {}
-        }
-	  
-	  
-	  
-	  
-	  
-	  
-        var isResponsiveSize = view.widthBreakpoint === "xsmall";
-        updateView(isResponsiveSize);
-
-        // Breakpoints
-        view.watch("widthBreakpoint", function(breakpoint) {
-            switch (breakpoint) {
-                case "xsmall":
-                    updateView(true);
-                    break;
-					
-                case "small":
-				updateView(true);
-				break;
-                case "medium":
-                case "large":
-                case "xlarge":
-                    updateView(false);
-                    break;
-                default:
-            }
-			
-		
-			
-			
-        });	  
-	  
-	  
-	  
-	  
-
+      // Breakpoints
+      view.watch("widthBreakpoint", function(breakpoint) {
+        updateView(isMobileBreakpoint(breakpoint));
+      });
 
     });
 
@@ -515,19 +650,21 @@ view.popup.collapseEnabled= false;
 </head>
 
 <body>
-  <div id="viewDiv"></div>
-  <div id="logoDiv"><a href="https://www.esrifrance.fr/"><img src="./images/esri_france_emblem_tag_srgbrev.png" alt="Esri France" width="150" /></a></div>
-  <div id="timeSlider"></div>
-  <div id="titleDiv" class="esri-widget">
-    <div id="titleText">Evolution du nombre global de vaccinés contre la Covid-19 par pays.</div>
-  </div>
-  
-  <div id="source" class="esri-widget" >
-    <div id="titleText">Web app réealisée avec <nobr><a style="color:rgb(107,236,87);" href="https://developers.arcgis.com/javascript/">ArcGIS API for JavaScript</a></nobr> Source code :<a style="color:rgb(107,236,87);" href="https://github.com/Sebastiensz/arcgis-javascript/edit/master/covid19-vaccin/index.html">Github</a></p>
-    <p>Data source:
-      <a style="color:rgb(107,236,87);" href="https://ourworldindata.org/covid-vaccinations"> Our World in Data</a>
-    </p> </div>
+  <main>
+    <div id="viewDiv" role="application" aria-label="Carte de la vaccination Covid-19 dans le monde"></div>
+    <div id="logoDiv"><a href="https://www.esrifrance.fr/" target="_blank" rel="noopener noreferrer"><img src="./images/esri_france_emblem_tag_srgbrev.png" alt="Esri France" width="150" /></a></div>
+    <div id="timeSlider"></div>
+    <div id="messageDiv" class="esri-widget" role="status" aria-live="polite">Chargement des données de vaccination…</div>
+    <div id="titleDiv" class="esri-widget">
+      <h1 id="titleText">Évolution du nombre global de vaccinés contre la Covid-19 par pays.</h1>
     </div>
+
+    <div id="source" class="esri-widget">
+      <p id="sourceText">Web app réalisée avec <span class="nowrap"><a href="https://developers.arcgis.com/javascript/" target="_blank" rel="noopener noreferrer">ArcGIS API for JavaScript</a></span> Source code : <a href="https://github.com/Sebastiensz/arcgis-portfolio/blob/master/covid-19/covid19-vaccin/index.html" target="_blank" rel="noopener noreferrer">Github</a></p>
+      <p>Data source : <a href="https://ourworldindata.org/covid-vaccinations" target="_blank" rel="noopener noreferrer">Our World in Data</a><br />
+        <span id="periodSentence">Données du <span id="periodText">13/12/2020 au 26/11/2021</span> (archive ; quelques pays n'ont pas de donnée sur les tout derniers jours)</span></p>
+    </div>
+  </main>
 </body>
 
 </html>
