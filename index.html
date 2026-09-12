@@ -2,8 +2,9 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
+  <meta name="description" content="Cartographie web et analyse des risques naturels : applications interactives sur les séismes, ouragans, incendies, la sinistralité CatNat et l'exposition assurantielle.">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CodeTheMap — Applications ArcGIS JavaScript</title>
+  <title>Sébastien Szollosi — Cartographie web et risques naturels</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -49,6 +50,7 @@
       border-bottom: 1px solid var(--border);
     }
     .section-hdr:first-child { margin-top: 0; }
+    .section-hdr > div { flex: 1; }
     .section-hdr h2 { font-size: 18px; font-weight: 700; color: white; }
     .section-hdr .cnt { font-size: 11px; color: var(--muted); font-weight: 600; background: rgba(255,255,255,.05); padding: 2px 8px; border-radius: 10px; }
     .section-hdr p { font-size: 12px; color: var(--muted); margin-top: 3px; }
@@ -106,24 +108,24 @@
 <body>
 
 <header>
-  <div class="logo">CodeTheMap</div>
-  <h1>Applications <em>ArcGIS</em> JavaScript</h1>
-  <p>Une collection d'expériences cartographiques, de hubs de données et d'outils personnels — tous construits avec ArcGIS API for JavaScript et des technologies web.</p>
+  <div class="logo">Sébastien Szollosi</div>
+  <h1>Cartographie web et <em>risques naturels</em></h1>
+  <p>Modélisateur catastrophes naturelles. Je conçois des cartes et des tableaux de bord qui rendent lisibles l'aléa, l'exposition et la sinistralité — des séismes en temps réel au gap de protection assurantiel.</p>
   <div class="header-links">
-    <a href="https://github.com/Sebastiensz/arcgis-portfolio" target="_blank">⬡ GitHub</a>
-    <a href="https://developers.arcgis.com/javascript/" target="_blank">📚 ArcGIS JS API</a>
-    <a href="./" target="_blank">🌐 Site en ligne</a>
+    <a href="https://github.com/Sebastiensz" target="_blank" rel="noopener">⬡ GitHub</a>
+    <a href="./CV/" target="_blank" rel="noopener">📄 CV</a>
+    <a href="https://www.codethemap.fr/" target="_blank" rel="noopener">✍️ Blog</a>
   </div>
 </header>
 
 <main>
 
-  <!-- ════════════════════════════════════════
-       HUBS
-  ════════════════════════════════════════ -->
   <div class="section-hdr">
-    <h2>🎯 Hubs</h2>
-    <span class="cnt">1 app</span>
+    <div>
+      <h2>🌋 Risques naturels</h2>
+      <p>Aléas, sinistralité et couverture assurantielle — le cœur de mon métier.</p>
+    </div>
+    <span class="cnt">8 apps</span>
   </div>
   <div class="grid-featured">
 
@@ -138,14 +140,169 @@
       <div class="card-desc">Tableau de bord complet des catastrophes naturelles en France depuis 1909 : cartes interactives, graphiques sinistralité, gap de protection assurantiel, données filtrables par péril, pays et date.</div>
       <div class="card-link">→ Voir le hub</div>
     </a>
+    <a class="card" href="./natcat/earthquake/usgs_data/index.html" target="_blank" style="--accent:#f97316">
+      <div class="card-top">
+        <div class="card-icon">🌋</div>
+        <div class="card-titles">
+          <div class="card-title">Séismes en temps réel</div>
+          <div class="card-sub">USGS · 2008–2018</div>
+        </div>
+      </div>
+      <div class="card-desc">Visualisation des séismes mondiaux entre 2008 et 2018 à partir des données de l'USGS. Magnitude, profondeur et localisation en temps réel.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./natcat/earthquake/usgs_data/earthquake_heatmap.html" target="_blank" style="--accent:#f97316">
+      <div class="card-top">
+        <div class="card-icon">🔥</div>
+        <div class="card-titles">
+          <div class="card-title">Séismes — Heatmap</div>
+          <div class="card-sub">Carte de densité mondiale</div>
+        </div>
+      </div>
+      <div class="card-desc">Carte de densité des séismes mondiaux de 2008 à 2018. Identifiez visuellement les zones de plus forte activité sismique à l'échelle planétaire.</div>
+      <div class="card-link">→ Voir la heatmap</div>
+    </a>
+    <a class="card" href="./natcat/earthquake/usgs_data/earthquakes_last_month_3D.html" target="_blank" style="--accent:#f97316">
+      <div class="card-top">
+        <div class="card-icon">🌐</div>
+        <div class="card-titles">
+          <div class="card-title">Séismes 3D</div>
+          <div class="card-sub">Dernier mois — Globe interactif</div>
+        </div>
+      </div>
+      <div class="card-desc">Globe 3D interactif des séismes du dernier mois. Explorez la profondeur des foyers et la magnitude de chaque événement en trois dimensions.</div>
+      <div class="card-link">→ Voir le globe</div>
+    </a>
+    <a class="card" href="./seisme%20globe%20lumineux/" target="_blank" style="--accent:#f97316">
+      <div class="card-top">
+        <div class="card-icon">✨</div>
+        <div class="card-titles">
+          <div class="card-title">Globe Séismique Lumineux</div>
+          <div class="card-sub">Visualisation « firefly »</div>
+        </div>
+      </div>
+      <div class="card-desc">Globe 3D lumineux avec symbologie « firefly » pour les séismes mondiaux. Un rendu artistique et percutant pour visualiser l'activité sismique planétaire.</div>
+      <div class="card-link">→ Voir le globe</div>
+    </a>
+    <a class="card" href="./natcat/wind/hurricane_south_stereographic_projection.html" target="_blank" style="--accent:#14b8a6">
+      <div class="card-top">
+        <div class="card-icon">🌪️</div>
+        <div class="card-titles">
+          <div class="card-title">Ouragans</div>
+          <div class="card-sub">Projection stéréographique polaire</div>
+        </div>
+      </div>
+      <div class="card-desc">Trajectoires d'ouragans reprojetées en projection stéréographique Pôle Sud. Démontre la reprojection client-side d'un CSVLayer dans ArcGIS JS API.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./natcat/wind/USA/" target="_blank" style="--accent:#14b8a6">
+      <div class="card-top">
+        <div class="card-icon">🌀</div>
+        <div class="card-titles">
+          <div class="card-title">Wind FlowRenderer</div>
+          <div class="card-sub">Ouragan Ida — Animation vent</div>
+        </div>
+      </div>
+      <div class="card-desc">Visualisation animée de la vitesse et direction du vent pendant l'ouragan Ida (août 2021) avec le FlowRenderer d'ArcGIS appliqué à un ImageryTileLayer.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./incendies-USA/" target="_blank" style="--accent:#f97316">
+      <div class="card-top">
+        <div class="card-icon">🔥</div>
+        <div class="card-titles">
+          <div class="card-title">Incendies USA</div>
+          <div class="card-sub">Feux de forêt aux États-Unis</div>
+        </div>
+      </div>
+      <div class="card-desc">Cartographie des incendies de forêt aux États-Unis. Données de superficie brûlée, localisation et évolution temporelle des grands feux américains.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
 
   </div>
 
-  <!-- ════════════════════════════════════════
-       COVID-19
-  ════════════════════════════════════════ -->
   <div class="section-hdr">
-    <h2>🦠 COVID-19</h2>
+    <div>
+      <h2>⚡ Énergie, population et territoires</h2>
+      <p>Exposition, infrastructures et mobilité : ce qui se trouve sous l'aléa.</p>
+    </div>
+    <span class="cnt">6 apps</span>
+  </div>
+  <div class="grid">
+
+    <a class="card" href="./clustering_powerplants/" target="_blank" style="--accent:#f59e0b">
+      <div class="card-top">
+        <div class="card-icon">⚡</div>
+        <div class="card-titles">
+          <div class="card-title">Centrales Électriques</div>
+          <div class="card-sub">Clustering mondial « firefly »</div>
+        </div>
+      </div>
+      <div class="card-desc">Cartographie mondiale des centrales électriques avec la symbologie Firefly et le clustering ArcGIS. Filtrez par type de source d'énergie.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./world-population-2020/" target="_blank" style="--accent:#3b82f6">
+      <div class="card-top">
+        <div class="card-icon">👥</div>
+        <div class="card-titles">
+          <div class="card-title">Population Mondiale 2020</div>
+          <div class="card-sub">Densité par slider</div>
+        </div>
+      </div>
+      <div class="card-desc">Visualisez la densité de population mondiale en 2020. Un slider permet de filtrer dynamiquement les zones selon un seuil de densité défini.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./carburants/" target="_blank" style="--accent:#22c55e">
+      <div class="card-top">
+        <div class="card-icon">⛽</div>
+        <div class="card-titles">
+          <div class="card-title">Carburants France</div>
+          <div class="card-sub">Prix par station-service</div>
+        </div>
+      </div>
+      <div class="card-desc">Observez les prix des carburants par station en France. Filtrez par type de carburant et identifiez les stations ouvertes 24h/24.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./carte-de-France/" target="_blank" style="--accent:#3b82f6">
+      <div class="card-top">
+        <div class="card-icon">🇫🇷</div>
+        <div class="card-titles">
+          <div class="card-title">Carte de France</div>
+          <div class="card-sub">Données géographiques françaises</div>
+        </div>
+      </div>
+      <div class="card-desc">Exploration interactive des données géographiques françaises. Découvrez les territoires, données administratives et statistiques à l'échelle nationale.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./liste-incidents-route-Europe/" target="_blank" style="--accent:#f97316">
+      <div class="card-top">
+        <div class="card-icon">🚗</div>
+        <div class="card-titles">
+          <div class="card-title">Incidents Routiers Europe</div>
+          <div class="card-sub">Tableau de suivi temps réel</div>
+        </div>
+      </div>
+      <div class="card-desc">Liste et carte des incidents routiers en Europe. Visualisez en temps réel les accidents, travaux et perturbations sur les grands axes européens.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+    <a class="card" href="./ever-given/" target="_blank" style="--accent:#14b8a6">
+      <div class="card-top">
+        <div class="card-icon">🚢</div>
+        <div class="card-titles">
+          <div class="card-title">Ever-Given</div>
+          <div class="card-sub">Simulez un blocage de canal</div>
+        </div>
+      </div>
+      <div class="card-desc">Modifiez la taille du porte-conteneurs Ever-Given et positionnez-le n'importe où dans le monde pour visualiser un potentiel blocage de canal ou de détroit.</div>
+      <div class="card-link">→ Voir la carte</div>
+    </a>
+
+  </div>
+
+  <div class="section-hdr">
+    <div>
+      <h2>🦠 Santé publique</h2>
+      <p>Cartographie de la crise sanitaire de 2020, réalisée pendant l'épidémie.</p>
+    </div>
     <span class="cnt">3 apps</span>
   </div>
   <div class="grid">
@@ -161,7 +318,6 @@
       <div class="card-desc">Observez la propagation du Covid-19 dans le monde depuis le début de l'épidémie. TimeSlider animé, taux de létalité par pays, mise à jour quotidienne.</div>
       <div class="card-link">→ Voir la carte</div>
     </a>
-
     <a class="card" href="./covid-19/covid19-vaccin/" target="_blank" style="--accent:#ef4444">
       <div class="card-top">
         <div class="card-icon">💉</div>
@@ -173,7 +329,6 @@
       <div class="card-desc">Découvrez les campagnes de vaccination Covid-19 dans le monde : valeur absolue et taux par population. Comparaison entre pays en temps réel.</div>
       <div class="card-link">→ Voir la carte</div>
     </a>
-
     <a class="card" href="./covid-19/perimetre-100-km/" target="_blank" style="--accent:#ef4444">
       <div class="card-top">
         <div class="card-icon">📏</div>
@@ -188,119 +343,12 @@
 
   </div>
 
-  <!-- ════════════════════════════════════════
-       CATASTROPHES NATURELLES
-  ════════════════════════════════════════ -->
   <div class="section-hdr">
-    <h2>🌋 Catastrophes Naturelles & Météo</h2>
-    <span class="cnt">8 apps</span>
-  </div>
-  <div class="grid">
-
-    <a class="card" href="./natcat/earthquake/usgs_data/index.html" target="_blank" style="--accent:#f97316">
-      <div class="card-top">
-        <div class="card-icon">🌋</div>
-        <div class="card-titles">
-          <div class="card-title">Séismes en temps réel</div>
-          <div class="card-sub">USGS · 2008–2018</div>
-        </div>
-      </div>
-      <div class="card-desc">Visualisation des séismes mondiaux entre 2008 et 2018 à partir des données de l'USGS. Magnitude, profondeur et localisation en temps réel.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./natcat/earthquake/usgs_data/earthquake_heatmap.html" target="_blank" style="--accent:#f97316">
-      <div class="card-top">
-        <div class="card-icon">🔥</div>
-        <div class="card-titles">
-          <div class="card-title">Séismes — Heatmap</div>
-          <div class="card-sub">Carte de densité mondiale</div>
-        </div>
-      </div>
-      <div class="card-desc">Carte de densité des séismes mondiaux de 2008 à 2018. Identifiez visuellement les zones de plus forte activité sismique à l'échelle planétaire.</div>
-      <div class="card-link">→ Voir la heatmap</div>
-    </a>
-
-    <a class="card" href="./natcat/earthquake/usgs_data/earthquakes_last_month_3D.html" target="_blank" style="--accent:#f97316">
-      <div class="card-top">
-        <div class="card-icon">🌐</div>
-        <div class="card-titles">
-          <div class="card-title">Séismes 3D</div>
-          <div class="card-sub">Dernier mois — Globe interactif</div>
-        </div>
-      </div>
-      <div class="card-desc">Globe 3D interactif des séismes du dernier mois. Explorez la profondeur des foyers et la magnitude de chaque événement en trois dimensions.</div>
-      <div class="card-link">→ Voir le globe</div>
-    </a>
-
-    <a class="card" href="./seisme%20globe%20lumineux/" target="_blank" style="--accent:#f97316">
-      <div class="card-top">
-        <div class="card-icon">✨</div>
-        <div class="card-titles">
-          <div class="card-title">Globe Séismique Lumineux</div>
-          <div class="card-sub">Visualisation « firefly »</div>
-        </div>
-      </div>
-      <div class="card-desc">Globe 3D lumineux avec symbologie « firefly » pour les séismes mondiaux. Un rendu artistique et percutant pour visualiser l'activité sismique planétaire.</div>
-      <div class="card-link">→ Voir le globe</div>
-    </a>
-
-    <a class="card" href="./incendies-USA/" target="_blank" style="--accent:#f97316">
-      <div class="card-top">
-        <div class="card-icon">🔥</div>
-        <div class="card-titles">
-          <div class="card-title">Incendies USA</div>
-          <div class="card-sub">Feux de forêt aux États-Unis</div>
-        </div>
-      </div>
-      <div class="card-desc">Cartographie des incendies de forêt aux États-Unis. Données de superficie brûlée, localisation et évolution temporelle des grands feux américains.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./natcat/wind/USA/" target="_blank" style="--accent:#14b8a6">
-      <div class="card-top">
-        <div class="card-icon">🌀</div>
-        <div class="card-titles">
-          <div class="card-title">Wind FlowRenderer</div>
-          <div class="card-sub">Ouragan Ida — Animation vent</div>
-        </div>
-      </div>
-      <div class="card-desc">Visualisation animée de la vitesse et direction du vent pendant l'ouragan Ida (août 2021) avec le FlowRenderer d'ArcGIS appliqué à un ImageryTileLayer.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./natcat/wind/hurricane_south_stereographic_projection.html" target="_blank" style="--accent:#14b8a6">
-      <div class="card-top">
-        <div class="card-icon">🌪️</div>
-        <div class="card-titles">
-          <div class="card-title">Ouragans</div>
-          <div class="card-sub">Projection stéréographique polaire</div>
-        </div>
-      </div>
-      <div class="card-desc">Trajectoires d'ouragans reprojetées en projection stéréographique Pôle Sud. Démontre la reprojection client-side d'un CSVLayer dans ArcGIS JS API.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./nukemap/" target="_blank" style="--accent:#ef4444">
-      <div class="card-top">
-        <div class="card-icon">💥</div>
-        <div class="card-titles">
-          <div class="card-title">Nukemap</div>
-          <div class="card-sub">Simulation d'impact nucléaire</div>
-        </div>
-      </div>
-      <div class="card-desc">Simulez l'impact d'une explosion nucléaire sur une ville. Visualisez les zones de souffle, de chaleur et de radiation selon la puissance de la bombe.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-  </div>
-
-  <!-- ════════════════════════════════════════
-       GLOBE & CARTOGRAPHIE
-  ════════════════════════════════════════ -->
-  <div class="section-hdr">
-    <h2>🗺️ Globe & Cartographie</h2>
-    <span class="cnt">10 apps</span>
+    <div>
+      <h2>🛰️ Exploration cartographique</h2>
+      <p>Scènes 3D, projections et expérimentations techniques.</p>
+    </div>
+    <span class="cnt">7 apps</span>
   </div>
   <div class="grid">
 
@@ -315,91 +363,17 @@
       <div class="card-desc">Visualisation 3D des altitudes extrêmes de notre planète : sommets, fosses océaniques, plaines. Un globe interactif pour explorer les contrastes topographiques de la Terre.</div>
       <div class="card-link">→ Voir le globe</div>
     </a>
-
-    <a class="card" href="./clustering_powerplants/" target="_blank" style="--accent:#f59e0b">
+    <a class="card" href="./nukemap/" target="_blank" style="--accent:#ef4444">
       <div class="card-top">
-        <div class="card-icon">⚡</div>
+        <div class="card-icon">💥</div>
         <div class="card-titles">
-          <div class="card-title">Centrales Électriques</div>
-          <div class="card-sub">Clustering mondial « firefly »</div>
+          <div class="card-title">Nukemap</div>
+          <div class="card-sub">Simulation d'impact nucléaire</div>
         </div>
       </div>
-      <div class="card-desc">Cartographie mondiale des centrales électriques avec la symbologie Firefly et le clustering ArcGIS. Filtrez par type de source d'énergie.</div>
+      <div class="card-desc">Simulez l'impact d'une explosion nucléaire sur une ville. Visualisez les zones de souffle, de chaleur et de radiation selon la puissance de la bombe.</div>
       <div class="card-link">→ Voir la carte</div>
     </a>
-
-    <a class="card" href="./world-population-2020/" target="_blank" style="--accent:#3b82f6">
-      <div class="card-top">
-        <div class="card-icon">👥</div>
-        <div class="card-titles">
-          <div class="card-title">Population Mondiale 2020</div>
-          <div class="card-sub">Densité par slider</div>
-        </div>
-      </div>
-      <div class="card-desc">Visualisez la densité de population mondiale en 2020. Un slider permet de filtrer dynamiquement les zones selon un seuil de densité défini.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./carburants/" target="_blank" style="--accent:#22c55e">
-      <div class="card-top">
-        <div class="card-icon">⛽</div>
-        <div class="card-titles">
-          <div class="card-title">Carburants France</div>
-          <div class="card-sub">Prix par station-service</div>
-        </div>
-      </div>
-      <div class="card-desc">Observez les prix des carburants par station en France. Filtrez par type de carburant et identifiez les stations ouvertes 24h/24.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./ever-given/" target="_blank" style="--accent:#14b8a6">
-      <div class="card-top">
-        <div class="card-icon">🚢</div>
-        <div class="card-titles">
-          <div class="card-title">Ever-Given</div>
-          <div class="card-sub">Simulez un blocage de canal</div>
-        </div>
-      </div>
-      <div class="card-desc">Modifiez la taille du porte-conteneurs Ever-Given et positionnez-le n'importe où dans le monde pour visualiser un potentiel blocage de canal ou de détroit.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./carte-de-France/" target="_blank" style="--accent:#3b82f6">
-      <div class="card-top">
-        <div class="card-icon">🇫🇷</div>
-        <div class="card-titles">
-          <div class="card-title">Carte de France</div>
-          <div class="card-sub">Données géographiques françaises</div>
-        </div>
-      </div>
-      <div class="card-desc">Exploration interactive des données géographiques françaises. Découvrez les territoires, données administratives et statistiques à l'échelle nationale.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./liste-incidents-route-Europe/" target="_blank" style="--accent:#f97316">
-      <div class="card-top">
-        <div class="card-icon">🚗</div>
-        <div class="card-titles">
-          <div class="card-title">Incidents Routiers Europe</div>
-          <div class="card-sub">Tableau de suivi temps réel</div>
-        </div>
-      </div>
-      <div class="card-desc">Liste et carte des incidents routiers en Europe. Visualisez en temps réel les accidents, travaux et perturbations sur les grands axes européens.</div>
-      <div class="card-link">→ Voir la carte</div>
-    </a>
-
-    <a class="card" href="./quizz-geographique/" target="_blank" style="--accent:#d4a017">
-      <div class="card-top">
-        <div class="card-icon">🌍</div>
-        <div class="card-titles">
-          <div class="card-title">Quiz Géographique</div>
-          <div class="card-sub">Devinez les pays sur la carte</div>
-        </div>
-      </div>
-      <div class="card-desc">20 pays à localiser sur une carte vierge — cliquez sur la bonne position pour marquer des points. Testez votre connaissance de la géographie mondiale !</div>
-      <div class="card-link">→ Jouer</div>
-    </a>
-
     <a class="card" href="./tothemoon/" target="_blank" style="--accent:#8b5cf6">
       <div class="card-top">
         <div class="card-icon">🚀</div>
@@ -411,7 +385,6 @@
       <div class="card-desc">Visualisation 3D d'un modèle glTF dans une scène ArcGIS. Explorez un environnement spatial en trois dimensions avec les capacités 3D de l'API JavaScript.</div>
       <div class="card-link">→ Voir la scène</div>
     </a>
-
     <a class="card" href="./Mars/" target="_blank" style="--accent:#ef4444">
       <div class="card-top">
         <div class="card-icon">🔴</div>
@@ -423,18 +396,17 @@
       <div class="card-desc">Exploration cartographique de la surface martienne. Visualisez la topographie et les données géologiques de Mars avec ArcGIS JavaScript API.</div>
       <div class="card-link">→ Explorer Mars</div>
     </a>
-
-  </div>
-
-  <!-- ════════════════════════════════════════
-       ÉVÉNEMENTS & DIVERTISSEMENT
-  ════════════════════════════════════════ -->
-  <div class="section-hdr">
-    <h2>🎉 Événements & Divertissement</h2>
-    <span class="cnt">2 apps</span>
-  </div>
-  <div class="grid">
-
+    <a class="card" href="./quizz-geographique/" target="_blank" style="--accent:#d4a017">
+      <div class="card-top">
+        <div class="card-icon">🌍</div>
+        <div class="card-titles">
+          <div class="card-title">Quiz Géographique</div>
+          <div class="card-sub">Devinez les pays sur la carte</div>
+        </div>
+      </div>
+      <div class="card-desc">20 pays à localiser sur une carte vierge — cliquez sur la bonne position pour marquer des points. Testez votre connaissance de la géographie mondiale !</div>
+      <div class="card-link">→ Jouer</div>
+    </a>
     <a class="card" href="./JO/2022/" target="_blank" style="--accent:#f59e0b">
       <div class="card-top">
         <div class="card-icon">🥇</div>
@@ -446,7 +418,6 @@
       <div class="card-desc">Carte interactive des Jeux Olympiques d'hiver 2022 de Pékin. Localisez les sites de compétition et explorez les résultats par discipline et par pays.</div>
       <div class="card-link">→ Voir la carte</div>
     </a>
-
     <a class="card" href="./Christmas/" target="_blank" style="--accent:#ef4444">
       <div class="card-top">
         <div class="card-icon">🎄</div>
@@ -461,16 +432,59 @@
 
   </div>
 
+  <div class="section-hdr">
+    <div>
+      <h2>🔬 Analyse et données</h2>
+      <p>Le volet traitement, en amont des cartes : Python, données de référence, automatisation.</p>
+    </div>
+    <span class="cnt">3 dépôts</span>
+  </div>
+  <div class="grid">
+
+    <a class="card" href="https://github.com/Sebastiensz/catnat" target="_blank" rel="noopener" style="--accent:#e74c3c">
+      <div class="card-top">
+        <div class="card-icon">📊</div>
+        <div class="card-titles">
+          <div class="card-title">Analyse CatNat</div>
+          <div class="card-sub">Python et données géospatiales</div>
+        </div>
+      </div>
+      <div class="card-desc">Traitement et analyse des catastrophes naturelles en France : historique des arrêtés, agrégation par commune et par péril, exploration des séries de sinistralité.</div>
+      <div class="card-link">→ Voir le dépôt</div>
+    </a>
+    <a class="card" href="https://github.com/Sebastiensz/data" target="_blank" rel="noopener" style="--accent:#2980b9">
+      <div class="card-top">
+        <div class="card-icon">🗃️</div>
+        <div class="card-titles">
+          <div class="card-title">Jeux de données</div>
+          <div class="card-sub">Analyse géospatiale</div>
+        </div>
+      </div>
+      <div class="card-desc">Jeux de données et notebooks d'analyse géospatiale : catastrophes naturelles mondiales, séismes, données de référence pour les cartes de ce portfolio.</div>
+      <div class="card-link">→ Voir le dépôt</div>
+    </a>
+    <a class="card" href="https://github.com/Sebastiensz/python-scripts" target="_blank" rel="noopener" style="--accent:#27ae60">
+      <div class="card-top">
+        <div class="card-icon">🐍</div>
+        <div class="card-titles">
+          <div class="card-title">Scripts Python</div>
+          <div class="card-sub">Automatisation et traitement</div>
+        </div>
+      </div>
+      <div class="card-desc">Utilitaires de traitement de données : manipulation de fichiers géographiques, automatisation de tâches récurrentes, préparation de jeux de données.</div>
+      <div class="card-link">→ Voir le dépôt</div>
+    </a>
+  </div>
+
 </main>
 
 <footer>
   <p>
-    Construit avec <a href="https://developers.arcgis.com/javascript/">ArcGIS API for JavaScript</a> ·
-    Hébergé sur <a href="./">GitHub Pages</a> ·
-    Données : OpenData, Esri Living Atlas, Natural Earth, OpenStreetMap
+    Applications construites avec <a href="https://developers.arcgis.com/javascript/" rel="noopener">ArcGIS Maps SDK for JavaScript</a> ·
+    Données : Esri Living Atlas, USGS, Natural Earth, OpenStreetMap, Our World in Data, données publiques françaises
   </p>
   <p style="margin-top:8px">
-    <a href="https://github.com/Sebastiensz/arcgis-portfolio">⬡ GitHub — Sebastiensz/arcgis-javascript</a>
+    <a href="https://github.com/Sebastiensz/Sebastiensz.github.io" rel="noopener">⬡ Code source de ce site</a>
   </p>
 </footer>
 
