@@ -1,13 +1,17 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
     <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="initial-scale=1,maximum-scale=1,user-scalable=no"
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Carte de Noël</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 100 100%27%3E%3Ctext y=%27.9em%27 font-size=%2790%27%3E%F0%9F%8E%84%3C/text%3E%3C/svg%3E"
     />
 
-<title>Carte de Noël</title>
+    <link rel="preconnect" href="https://js.arcgis.com" />
+    <link rel="preconnect" href="https://basemaps.arcgis.com" crossorigin />
 
     <style>
       html,
@@ -17,6 +21,94 @@
         margin: 0;
         height: 100%;
         width: 100%;
+      }
+
+      /* Titre réservé aux lecteurs d'écran */
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      /* Indicateur de chargement, recyclé en message d'erreur si besoin */
+      #etat {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        max-width: min(90vw, 28em);
+        z-index: 10;
+        padding: 0.9em 1.2em;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.95);
+        box-shadow: 0 1px 6px rgba(0, 0, 0, 0.3);
+        font-family: "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
+        font-size: 0.95rem;
+        line-height: 1.4;
+        color: #323232;
+        text-align: center;
+      }
+
+      #etat.erreur {
+        border-left: 4px solid #b30000;
+        text-align: left;
+      }
+
+      /* Bandeau de contexte, crédit du fond de plan et retour au portfolio */
+      #infos {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        z-index: 9;
+        max-width: min(80vw, 20em);
+        padding: 0.7em 0.9em;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+        font-family: "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
+        font-size: 0.8rem;
+        line-height: 1.35;
+        color: #323232;
+      }
+
+      #infos p {
+        margin: 0 0 0.4em;
+      }
+
+      #infos .titre {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #b30000;
+      }
+
+      #infos .credit {
+        margin: 0;
+        color: #6e6e6e;
+      }
+
+      #infos a {
+        color: #0079c1;
+      }
+
+      /* Sur petit écran, le bandeau doit masquer le moins de carte possible */
+      @media (max-width: 640px) {
+        #infos {
+          top: 10px;
+          right: 10px;
+          max-width: min(62vw, 16em);
+          padding: 0.5em 0.65em;
+          font-size: 0.7rem;
+        }
+
+        #infos .titre {
+          font-size: 0.8rem;
+        }
       }
     </style>
 
@@ -28,24 +120,143 @@
     <script src="https://js.arcgis.com/4.14/"></script>
 
     <script>
-      require(["esri/views/MapView", "esri/WebMap"], function(MapView, WebMap) {
-       
-        var webmap = new WebMap({
-          portalItem: {
-            // autocasts as new PortalItem()
-            id: "0465557e75674c4fa48765667568a1f8"
+      require([
+        "esri/Map",
+        "esri/Basemap",
+        "esri/layers/VectorTileLayer",
+        "esri/views/SceneView",
+        "esri/views/MapView",
+        "esri/widgets/Home",
+        "esri/identity/IdentityManager"
+      ], function(Map, Basemap, VectorTileLayer, SceneView, MapView, Home, esriId) {
+        var etat = document.getElementById("etat");
+        var infos = document.getElementById("infos");
+
+        function pret(mode) {
+          etat.hidden = true;
+          document.body.setAttribute("data-vue", mode);
+        }
+
+        function echec(message, erreur) {
+          etat.hidden = false;
+          etat.className = "erreur";
+          etat.innerHTML = message;
+          if (erreur) {
+            console.error(erreur);
           }
+        }
+
+        // Un portfolio public ne doit jamais réclamer d'identifiants ArcGIS :
+        // si une ressource devenait protégée, on échoue proprement au lieu
+        // d'afficher la boîte de dialogue « Se connecter » de l'API.
+        esriId.getCredential = function() {
+          return Promise.reject(new Error("Accès anonyme uniquement"));
+        };
+
+        // Fond de plan festif : style vectoriel servi en local (style-noel.json),
+        // tuiles et polices publiques d'Esri (World_Basemap_v2), sprites locaux.
+        var fondNoel = new VectorTileLayer({
+          url: "style-noel.json",
+          title: "Fond de carte de Noël"
         });
 
-        var view = new MapView({
-          map: webmap,
-          container: "viewDiv"
+        var carte = new Map({
+          basemap: new Basemap({
+            baseLayers: [fondNoel],
+            title: "Joyeux Noël"
+          })
         });
+
+        // Vue 3D : le fond de Noël est drapé sur le globe.
+        var vue = new SceneView({
+          container: "viewDiv",
+          map: carte,
+          viewingMode: "global",
+          camera: {
+            position: { longitude: 2.35, latitude: 20, z: 22000000 },
+            heading: 0,
+            tilt: 0
+          },
+          constraints: { altitude: { min: 500000, max: 40000000 } }
+        });
+
+        function replierEn2D() {
+          var vue2d = new MapView({
+            container: "viewDiv",
+            map: carte,
+            center: [2.35, 48.85],
+            zoom: 4
+          });
+
+          vue2d.when(function() {
+            vue2d.ui.add(new Home({ view: vue2d }), "top-left");
+            document
+              .getElementById("viewDiv")
+              .setAttribute("aria-label", "Carte de Noël interactive (2D)");
+            infos.insertAdjacentHTML(
+              "beforeend",
+              '<p class="credit">Affichage 2D : la 3D n’est pas disponible sur cet appareil.</p>'
+            );
+            pret("2d");
+          }, function(erreur) {
+            echec("La carte n’a pas pu être affichée sur cet appareil.", erreur);
+          });
+        }
+
+        vue.when(function() {
+          vue.ui.add(new Home({ view: vue }), "top-left");
+          pret("3d");
+        }, function(erreur) {
+          // WebGL 3D indisponible (GPU bloqué, matériel ancien) : on bascule sur
+          // la même carte en 2D plutôt que de laisser un écran vide.
+          console.warn("Scène 3D indisponible, repli en 2D.", erreur);
+          vue.container = null;
+          replierEn2D();
+        });
+
+        // Le fond de plan est la seule donnée de l'application : si son style ou
+        // ses tuiles ne répondent plus, on le dit clairement à l'utilisateur.
+        fondNoel.when(null, function(erreur) {
+          echec(
+            "Le fond de carte de Noël est indisponible (service de tuiles vectorielles injoignable).",
+            erreur
+          );
+        });
+      }, function(erreur) {
+        var etat = document.getElementById("etat");
+        etat.className = "erreur";
+        etat.innerHTML = "L’API ArcGIS for JavaScript n’a pas pu être chargée.";
+        console.error(erreur);
       });
     </script>
   </head>
 
   <body>
-    <div id="viewDiv"></div>
+    <h1 class="sr-only">Carte de Noël</h1>
+
+    <div
+      id="viewDiv"
+      role="application"
+      aria-label="Globe 3D habillé d’un fond de carte de Noël"
+    ></div>
+
+    <div id="etat" role="status" aria-live="polite">
+      Chargement de la carte de Noël…
+    </div>
+
+    <div id="infos">
+      <p class="titre">Carte de Noël</p>
+      <p>
+        Un globe 3D habillé d’un fond de plan vectoriel aux couleurs de Noël.
+        <a href="../">Retour au portfolio</a>
+      </p>
+      <p class="credit">
+        Style « Merry Christmas » et tuiles vectorielles : Esri.
+      </p>
+    </div>
+
+    <noscript>
+      <p>Cette carte nécessite JavaScript pour s’afficher.</p>
+    </noscript>
   </body>
 </html>
