@@ -1,13 +1,14 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Prix des carburants</title>
+  <meta name="description"
+    content="Carte des prix des carburants par station-service en France, avec agrégation par région et par département.">
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.9/esri/themes/light/main.css">
-  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css">
   <link rel="stylesheet" href="./style.css">
 
   <script src="https://js.arcgis.com/4.9/"></script>
@@ -17,7 +18,16 @@
 </head>
 
 <body>
-  <div id="viewDiv"></div>
+  <!-- Avertissement permanent : le service de données n'est plus alimenté (cf. app.js) -->
+  <div id="topBar">Données open data figées au 08/10/2022, non mises à jour — démonstration cartographique.</div>
+  <div id="notices">
+    <div id="errorBanner" class="notice notice-error" role="alert" hidden></div>
+    <div id="filterNotice" class="notice notice-info" role="status" hidden></div>
+  </div>
+  <div id="mapWrap">
+    <div id="viewDiv"></div>
+    <div id="loading" role="status">Chargement des données…</div>
+  </div>
 </body>
 
 </html>
