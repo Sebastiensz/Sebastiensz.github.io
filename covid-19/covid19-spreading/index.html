@@ -3,7 +3,9 @@
 
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description"
+    content="Carte animée de la propagation mondiale du COVID-19 : cas cumulés et taux de létalité par pays, du 31/12/2019 au 23/06/2024." />
   <!--
   ArcGIS API for JavaScript, https://js.arcgis.com
   For more information about the widgets-timeslider sample, read the original sample description at developers.arcgis.com.
@@ -14,7 +16,7 @@ url des donnees https://ourworldindata.org/coronavirus-source-data
 css : https://developers.arcgis.com/javascript/latest/guide/styling/
 
   -->
-  <title>Coronavirus COVID-19 spreading over the world"</title>
+  <title>Propagation du COVID-19 dans le monde</title>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.14/esri/themes/dark/main.css" />
   <script src="https://js.arcgis.com/4.14/"></script>
@@ -29,11 +31,29 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       width: 100%;
     }
 
+    /* les blocs repris par view.ui sont declares dans le body : sans cela ils
+       ajoutent une barre de defilement le temps que l'API les deplace */
+    body {
+      overflow: hidden;
+    }
+
     #timeSlider {
       position: absolute;
       left: 100px;
       right: 100px;
       bottom: 20px;
+      /* masque tant que la plage de dates n'est pas connue : un TimeSlider vide,
+         sans dates et aux boutons desactives, donne l'impression d'un bug */
+      visibility: hidden;
+    }
+
+    /* fond opaque : sans lui les gros symboles de donnees passent sous le logo
+       et le rendent illisible */
+    #logoDiv {
+      padding: 4px 6px;
+      line-height: 0;
+      background: rgba(36, 36, 36, 0.9);
+      border-radius: 2px;
     }
 
     #titleDiv {
@@ -42,30 +62,123 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       text-align: center;
       font-size: 20px;
     }
-    
+
+    /* le titre est un <h1> : on neutralise les marges et la taille par defaut */
+    #titleText {
+      margin: 0;
+      font-size: inherit;
+      font-weight: inherit;
+      line-height: 1.2;
+    }
+
+    /* bloc credits : place par view.ui (flux), donc aucun positionnement ici */
     #source {
-      padding: 10px;
+      padding: 8px 10px;
       font-weight: normal;
       text-align: center;
-      font-size:12px;
-      position: absolute;
-      right: 10px;
-      bottom: 120px;
-      width:160px;
+      font-size: 12px;
+      line-height: 1.35;
+      width: 160px;
+      background: rgba(36, 36, 36, 0.9);
+      border-radius: 2px;
+    }
+
+    #source p {
+      margin: 0 0 6px 0;
+    }
+
+    #source p:last-child {
+      margin-bottom: 0;
+    }
+
+    #loadingDiv,
+    #errorDiv {
+      padding: 10px;
+      font-size: 13px;
+      line-height: 1.35;
+      max-width: 280px;
+    }
+
+    #errorDiv {
+      border-left: 3px solid #e49143;
+    }
+
+    /* --- petits ecrans : on evite les chevauchements et le debordement du TimeSlider --- */
+    @media (max-width: 768px) {
+      #timeSlider {
+        left: 0;
+        right: 0;
+        /* 16 px = hauteur de la barre d'attribution Esri, qui doit rester visible */
+        bottom: 16px;
       }
-    #logoDiv {
-      border: 0px dotted red;
+
+      /* le widget impose min-width: 375px, trop large pour les plus petits telephones */
+      .esri-time-slider {
+        min-width: 0;
+      }
+
+      .esri-time-slider__layout--compact .esri-time-slider__min,
+      .esri-time-slider__layout--compact .esri-time-slider__max {
+        margin: 0 10px;
+      }
+
+      #titleDiv {
+        font-size: 15px;
+        padding: 6px 8px;
+      }
+
+      /* logo decoratif : masque pour liberer le coin haut-droit */
+      #logoDiv {
+        display: none;
+      }
+
+      #source {
+        font-size: 11px;
+        padding: 6px 8px;
+      }
+
+      #loadingDiv,
+      #errorDiv {
+        max-width: 230px;
+        font-size: 12px;
+      }
     }
   </style>
 
+  <!-- Taux de letalite = deces / cas, en pourcentage arrondi a 2 decimales.
+       total_cases et total_deaths sont de type texte dans le service : on convertit avant de calculer. -->
   <script type="text/plain" id="lethality-arcade">
-      // Returns the share of the dominant demographic as a percentage
-      var fieldValues = [ $feature.total_cases, $feature.total_deaths ];
-      var cases = fieldValues[0];
-      var deaths = fieldValues[1];
-      if (!cases || cases == 0) return 'N/A';
-       var result=Round((deaths/cases) * 100,2)
-      return result + ' %';
+      var brutCas = $feature.total_cases;
+      var brutDeces = $feature.total_deaths;
+      if (IsEmpty(brutCas) || IsEmpty(brutDeces)) { return 'N/A'; }
+      var cas = Number(brutCas);
+      var deces = Number(brutDeces);
+      if (IsNan(cas) || IsNan(deces) || cas == 0) { return 'N/A'; }
+      return Text(Round((deces / cas) * 100, 2)) + ' %';
+    </script>
+
+  <!-- Cumul de cas formate avec separateur de milliers (le champ est du texte : format: {} serait sans effet). -->
+  <script type="text/plain" id="cases-arcade">
+      var brut = $feature.total_cases;
+      if (IsEmpty(brut)) { return 'N/A'; }
+      var valeur = Number(brut);
+      if (IsNan(valeur)) { return 'N/A'; }
+      return Text(valeur, '#,###');
+    </script>
+
+  <!-- Cumul de deces formate avec separateur de milliers. -->
+  <script type="text/plain" id="deaths-arcade">
+      var brut = $feature.total_deaths;
+      if (IsEmpty(brut)) { return 'N/A'; }
+      var valeur = Number(brut);
+      if (IsNan(valeur)) { return 'N/A'; }
+      return Text(valeur, '#,###');
+    </script>
+
+  <!-- Date de la mesure, sans l'heure (le champ est horodate a 00:00 UTC). -->
+  <script type="text/plain" id="date-arcade">
+      if (IsEmpty($feature.date_)) { return 'N/A'; }
+      return Text($feature.date_, 'DD/MM/Y');
     </script>
 
   <script>
@@ -82,6 +195,10 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       "esri/widgets/Bookmarks",
       "esri/webmap/Bookmark"
     ], function (Map, MapView, FeatureLayer, TimeSlider, Expand, Legend, Search, Zoom, Home, Bookmarks, Bookmark) {
+
+      // L'animation demarre a cette date : au 31/12/2019 la carte est vide et
+      // l'utilisateur ne sait pas si l'application charge ou a plante.
+      const DATE_DEBUT_ANIMATION = new Date(Date.UTC(2020, 2, 1));
 
       const renderer = {
         type: "simple",
@@ -128,41 +245,52 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
             legendOptions: {
               title: "Total des cas dans le pays"
             },
+            // Le widget Legend bascule en mode "libelles fournis par l'auteur"
+            // des qu'un seul stop en porte un : ils sont donc tous explicites,
+            // sinon les cinq paliers chiffres disparaissent de la legende.
             stops: [
               {
                 value: 9000000,
-                size: "124px"
+                size: "124px",
+                label: "> 9 000 000"
               }, {
                 value: 5000000,
-                size: "80px"
+                size: "80px",
+                label: "5 000 000"
               },
               {
                 value: 200000,
-                size: "24px"
+                size: "24px",
+                label: "200 000"
               },
               {
                 value:50000,
-                size:"6px"},
+                size:"6px",
+                label: "50 000"},
               {
                 value:1000,
-                size:"3px"},
+                size:"3px",
+                label: "1 000"},
               {
                 value:0,
-                size:"0px"}
+                size:"0px",
+                label:"aucun cas"}
             ]
           }
         ]
       };
 
 
+      // outFields volontairement non defini : la couche compte 352 000 entites et
+      // l'API ne rapatrie alors que les champs du rendu et de la date. Y ajouter
+      // SHORT_NAME coute 5 Mo de tuiles PBF en plus ; le popup va chercher ce champ
+      // a la demande, entite par entite (voir view.on("click")).
       var layer = new FeatureLayer({
-        //url: "https://services.arcgis.com/d3voDfTFbHOCRwVR/arcgis/rest/services/data_full_covid19/FeatureServer/0",
         url:"https://services.arcgis.com/d3voDfTFbHOCRwVR/arcgis/rest/services/COVID19_centroids_country/FeatureServer/0",
         renderer: renderer
       });
 
       const map = new Map({
-        //basemap: "satellite",
         basemap: "dark-gray",
         layers: [layer]
       });
@@ -178,15 +306,28 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       });
 
       var arcadeExpressionInfos = [
-        // Get Arcade expression returning the predominant demographic in the county:
-        // Whether the majority of people are in the labor force or not
+        // Taux de letalite du pays a la date affichee
         {
           name: "lethality-arcade",
           title: "Taux de létalité",
           expression: document.getElementById("lethality-arcade").text
         },
-        // Get Arcade expression returning the share of the total comprised
-        // by the predominant category
+        // Cumuls formates (les champs sources sont de type texte)
+        {
+          name: "cases-arcade",
+          title: "Cas cumulés",
+          expression: document.getElementById("cases-arcade").text
+        },
+        {
+          name: "deaths-arcade",
+          title: "Décès cumulés",
+          expression: document.getElementById("deaths-arcade").text
+        },
+        {
+          name: "date-arcade",
+          title: "Date de la mesure",
+          expression: document.getElementById("date-arcade").text
+        }
       ];
 
 
@@ -197,34 +338,27 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
           {
             type: "text",
             text:
-              "{SHORT_NAME}: Il y a eu au total {total_cases} contaminés identifiés et déclarés le {date_} dont" +
-              " {expression/lethality-arcade} de cas décédés."
+              "{SHORT_NAME} : il y a eu au total {expression/cases-arcade} contaminés identifiés et déclarés au" +
+              " {expression/date-arcade} dont {expression/lethality-arcade} de cas décédés."
           },
           {
             type: "fields",
             fieldInfos: [
               {
-                fieldName: "total_cases",
-                label: "Nombre de personnes atteintes par le Covid-19 identifiées et déclarées",
-                format: {
-                  digitSeparator: true,
-                  places: 0
-                }
+                fieldName: "expression/date-arcade",
+                label: "Date de la mesure"
               },
               {
-                fieldName: "total_deaths",
-                label: "Nombre de morts par le Covid-19",
-                format: {
-                  digitSeparator: true,
-                  places: 0
-                }
+                fieldName: "expression/cases-arcade",
+                label: "Nombre de personnes atteintes par le Covid-19 identifiées et déclarées"
+              },
+              {
+                fieldName: "expression/deaths-arcade",
+                label: "Nombre de morts par le Covid-19"
               },
               {
                 fieldName: "expression/lethality-arcade",
-                format: {
-                  digitSeparator: true,
-                  places: 0
-                }
+                label: "Taux de létalité"
               }
             ]
           }
@@ -240,28 +374,94 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
         view: view
       });
       let timeLayerView;
+      let animationDemarree = false;
+      let erreurAffichee = false;
+
+      const noeudChargement = document.getElementById("loadingDiv");
+      const noeudErreur = document.getElementById("errorDiv");
+      const noeudTimeSlider = document.getElementById("timeSlider");
+
+      // L'API reessaie plusieurs fois avant de rejeter : en cas de service lent ou
+      // injoignable, l'utilisateur peut rester une minute sur "Chargement...".
+      // Le chargement nominal tient en ~30 s, on ne previent donc qu'au-dela.
+      const attenteLongue = setTimeout(function () {
+        if (!animationDemarree && !erreurAffichee) {
+          noeudChargement.textContent =
+            "Chargement des données COVID-19… Le service met du temps à répondre.";
+        }
+      }, 45000);
+
+      function masquerChargement() {
+        clearTimeout(attenteLongue);
+        noeudChargement.style.display = "none";
+      }
+
+      /**
+       * Degradation gracieuse : si le service de donnees ne repond pas, on le dit
+       * a l'utilisateur au lieu de laisser une application vide et un TimeSlider inerte.
+       */
+      function afficherErreurDonnees() {
+        if (erreurAffichee) return;
+        erreurAffichee = true;
+        masquerChargement();
+        noeudTimeSlider.style.display = "none";
+        noeudErreur.style.display = "block";
+      }
+
+      function demarrerAnimation() {
+        if (animationDemarree || erreurAffichee) return;
+        animationDemarree = true;
+        masquerChargement();
+        timeSlider.play();
+      }
+
+      // la couche peut echouer avant meme qu'une vue de couche soit creee
+      layer.load().catch(afficherErreurDonnees);
+
       view.whenLayerView(layer).then(function (lv) {
         timeLayerView = lv;
         const fullTimeExtent = layer.timeInfo.fullTimeExtent;
 
         timeSlider.fullTimeExtent = fullTimeExtent;
+        // pas hebdomadaire : 1 642 pas quotidiens rendaient l'animation interminable
         timeSlider.stops = {
           interval: {
             value: 1,
-            unit: "days"
+            unit: "weeks"
           },
           timeExtent: {
-            start: fullTimeExtent.start,//1579564800000,
-            end: fullTimeExtent.end//1584403200000
+            start: fullTimeExtent.start,
+            end: fullTimeExtent.end
           }
+        };
+
+        // date de fin reelle de la serie, affichee dans le bloc credits
+        if (fullTimeExtent.end) {
+          document.getElementById("dataEnd").textContent =
+            "série arrêtée au " + fullTimeExtent.end.toLocaleDateString("fr-FR");
         }
-        
-              timeSlider.play();
-        
-      });
+
+        const debut = (fullTimeExtent.start && DATE_DEBUT_ANIMATION > fullTimeExtent.start)
+          ? DATE_DEBUT_ANIMATION
+          : fullTimeExtent.start;
+        timeSlider.values = [debut];
+
+        // le controle n'est montre qu'une fois ses dates posees (cf. visibility: hidden)
+        noeudTimeSlider.style.visibility = "visible";
+
+        // on ne lance la lecture qu'une fois le premier rendu termine
+        const suivi = lv.watch("updating", function (enCours) {
+          if (!enCours) {
+            suivi.remove();
+            demarrerAnimation();
+          }
+        });
+        // filet de securite si l'evenement n'arrive jamais
+        setTimeout(demarrerAnimation, 20000);
+      }).catch(afficherErreurDonnees);
 
       view.ui.add(timeSlider, "manual");
-      
+
       timeSlider.watch("timeExtent", function(value){
         if (!timeLayerView) return;
         timeLayerView.filter = {
@@ -270,37 +470,209 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       });
 
       timeSlider.set({
-        loop: false,
-        playRate: 100
+        loop: true,
+        playRate: 150
       });
 
+      // Popup : la couche empile un enregistrement par pays ET par jour sur le meme
+      // centroide (~1 630 par pays). Le popup natif n'applique pas le filtre temporel
+      // au hit-test et remonterait donc un millier de fiches "Sans titre". On l'ouvre
+      // nous-memes, en ne gardant que l'enregistrement de la date affichee.
+      view.popup.autoOpenEnabled = false;
+      view.popup.featureNavigationEnabled = false;
+
+      /** Retourne, parmi les entites remontees, celle dont la date colle a celle du TimeSlider. */
+      function entiteDeLaDateAffichee(entites) {
+        if (!entites || !entites.length) return null;
+        const instant = timeSlider.timeExtent && timeSlider.timeExtent.start;
+        if (!instant) return entites[0];
+        const cible = instant.getTime();
+        let meilleure = entites[0];
+        let ecartMin = Infinity;
+        entites.forEach(function (entite) {
+          const date = entite.attributes && entite.attributes.date_;
+          const ecart = (date === null || date === undefined)
+            ? Infinity
+            : Math.abs(new Date(date).getTime() - cible);
+          if (ecart < ecartMin) {
+            ecartMin = ecart;
+            meilleure = entite;
+          }
+        });
+        return meilleure;
+      }
+
+      /**
+       * Resout quand le curseur ET le dessin sont stabilises. timeSlider.stop()
+       * laisse le curseur avancer d'un ou deux pas, et la vue de couche dessine
+       * avec un temps de retard : sans cette attente, la fiche afficherait une
+       * date differente de celle du TimeSlider. Plafonne a 2,5 s.
+       */
+      function quandAffichageStabilise() {
+        return new Promise(function (resoudre) {
+          const debut = Date.now();
+          let precedente = null;
+          (function verifier() {
+            const extent = timeSlider.timeExtent;
+            const courante = (extent && extent.start) ? extent.start.getTime() : null;
+            const curseurFige = (courante !== null && courante === precedente);
+            if ((curseurFige && timeLayerView && !timeLayerView.updating) || Date.now() - debut > 2500) {
+              resoudre();
+              return;
+            }
+            precedente = courante;
+            setTimeout(verifier, 200);
+          })();
+        });
+      }
+
+      // La lecture est figee le temps de consulter une fiche, puis relancee quand
+      // l'utilisateur ferme le popup (ou si son clic ne designait aucun pays).
+      let lectureAvantClic = false;
+
+      function reprendreLecture() {
+        if (!lectureAvantClic) return;
+        lectureAvantClic = false;
+        if (!timeSlider.viewModel || timeSlider.viewModel.state !== "playing") {
+          timeSlider.play();
+        }
+      }
+
+      view.popup.watch("visible", function (visible) {
+        if (!visible) reprendreLecture();
+      });
+
+      /** Fiche indisponible : on le dit au lieu de laisser le clic sans effet. */
+      function signalerEchecFiche(erreur, point) {
+        console.warn("Fiche COVID-19 indisponible :", erreur);
+        try {
+          view.popup.open({
+            title: "COVID-19",
+            content: "Impossible de récupérer la fiche de ce pays. Réessayez dans un instant.",
+            location: point
+          });
+        } catch (e) {
+          view.popup.close();
+          reprendreLecture();
+        }
+      }
+
+      view.on("click", function (event) {
+        if (!timeLayerView) return;
+        // on fige l'animation des le clic : sans cela la date change pendant
+        // l'interrogation et la fiche ne correspond plus a ce qui est affiche.
+        if (timeSlider.viewModel && timeSlider.viewModel.state === "playing") {
+          lectureAvantClic = true;
+        }
+        timeSlider.stop();
+
+        quandAffichageStabilise().then(function () {
+          return view.hitTest(event);
+        }).then(function (reponse) {
+          const touche = (reponse.results || []).filter(function (resultat) {
+            return resultat.graphic && resultat.graphic.layer === layer;
+          })[0];
+          if (!touche) {
+            view.popup.close();
+            reprendreLecture();
+            return;
+          }
+
+          // Deux interrogations, parce que les champs du popup ne sont pas charges
+          // cote client (voir outFields non defini sur la couche) et que le dessin
+          // a un pas ou deux de retard sur le curseur :
+          //  1. par identifiant, pour savoir quel pays a ete clique ;
+          //  2. par nom de pays + fenetre temporelle du TimeSlider, pour que la
+          //     fiche porte bien sur la date lue sur le curseur.
+          const identifiant = touche.graphic.attributes
+            ? touche.graphic.attributes[layer.objectIdField]
+            : null;
+
+          const requete = layer.createQuery();
+          requete.outFields = ["SHORT_NAME", "total_cases", "total_deaths", "date_"];
+          requete.returnGeometry = true;
+          if (identifiant !== null && identifiant !== undefined) {
+            requete.objectIds = [identifiant];
+          } else {
+            // repli : meme centroide, restreint a la fenetre temporelle affichee
+            requete.geometry = touche.graphic.geometry;
+            requete.spatialRelationship = "intersects";
+            requete.timeExtent = timeSlider.timeExtent;
+          }
+
+          layer.queryFeatures(requete).then(function (resultat) {
+            const trouvee = entiteDeLaDateAffichee(resultat && resultat.features);
+            const pays = trouvee && trouvee.attributes && trouvee.attributes.SHORT_NAME;
+            if (!pays) return resultat;
+
+            const requetePays = layer.createQuery();
+            requetePays.where = "SHORT_NAME = '" + String(pays).replace(/'/g, "''") + "'";
+            requetePays.outFields = requete.outFields;
+            requetePays.returnGeometry = true;
+            requetePays.timeExtent = timeSlider.timeExtent;
+            // si la date du curseur n'a pas d'enregistrement, on garde le premier resultat
+            return layer.queryFeatures(requetePays).then(function (aLaDate) {
+              return (aLaDate && aLaDate.features && aLaDate.features.length) ? aLaDate : resultat;
+            }).catch(function (erreur) {
+              console.warn("Requête par pays en échec, repli sur l'entité cliquée :", erreur);
+              return resultat;
+            });
+          }).then(function (resultat) {
+            const entite = entiteDeLaDateAffichee(resultat && resultat.features);
+            if (!entite) {
+              signalerEchecFiche("aucune entité retournée pour ce pays", touche.mapPoint || event.mapPoint);
+              return;
+            }
+            // l'entite vient d'une requete : elle n'est rattachee a aucune couche.
+            // layer ET sourceLayer sont necessaires, sinon le popup s'ouvre vide
+            // ("0 resultats") faute de pouvoir resoudre le template.
+            entite.layer = layer;
+            entite.sourceLayer = layer;
+            entite.popupTemplate = layer.popupTemplate;
+            view.popup.open({
+              features: [entite],
+              location: entite.geometry || touche.mapPoint || event.mapPoint
+            });
+          }).catch(function (erreur) {
+            signalerEchecFiche(erreur, touche.mapPoint || event.mapPoint);
+          });
+        }).catch(function (erreur) {
+          console.warn("Interrogation de la carte en échec :", erreur);
+          reprendreLecture();
+        });
+      });
+
+      // le widget Zoom par defaut est retire puis recree pour maitriser l'ordre
+      // des elements de la colonne haut-gauche (titre, message, zoom, accueil, legende)
       view.ui.remove("zoom");
 
       view.ui.add("titleDiv", {
         position: "top-left",
+        index: 0
+      });
+
+      view.ui.add("loadingDiv", {
+        position: "top-left",
         index: 1
       });
-      
-      view.ui.add("source","manual");
-      
+
+      view.ui.add("errorDiv", {
+        position: "top-left",
+        index: 2
+      });
+
       const zoom = new Zoom({
         view: view
       });
       view.ui.add(zoom, {
         position: "top-left",
-        index: 2
+        index: 3
       });
 
       const searchWidget = new Search({
         view: view
       });
-      // Adds the search widget below other elements in
-      // the top left corner of the view
-      view.ui.add(searchWidget, {
-        position: "top-right",
-        index: 1
-      });
-      
+
       view.ui.add("logoDiv", "top-right");
 
       const bookmarks = new Bookmarks({
@@ -372,6 +744,7 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
       const bkExpand = new Expand({
         view: view,
         content: bookmarks,
+        expandTooltip: "Géosignets",
         expanded: false
       });
 
@@ -394,15 +767,36 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
         }]
       });
       const legendExpand = new Expand({
-        expandIconClass: "esri-icon-drag-horizontal",
-        expandTooltip: "Legend",
+        expandIconClass: "esri-icon-layer-list",
+        expandTooltip: "Légende",
         view: view,
         expanded: false,
         content: legend,
       });
       view.ui.add(legendExpand, "top-left");
 
+      // Sur petit ecran, la recherche et le bloc credits passent dans la colonne
+      // haut-gauche : places a droite ils recouvrent le titre et le TimeSlider.
+      const noeudSource = document.getElementById("source");
+      let miseEnPageCourante = null;
 
+      function adapterMiseEnPage(breakpoint) {
+        const petitEcran = (breakpoint === "xsmall" || breakpoint === "small");
+        if (petitEcran === miseEnPageCourante) return;
+        miseEnPageCourante = petitEcran;
+        view.ui.remove(searchWidget);
+        view.ui.remove(noeudSource);
+        if (petitEcran) {
+          view.ui.add(searchWidget, { position: "top-left", index: 1 });
+          view.ui.add(noeudSource, "top-left");
+        } else {
+          view.ui.add(searchWidget, { position: "top-right", index: 0 });
+          view.ui.add(noeudSource, "top-right");
+        }
+      }
+
+      adapterMiseEnPage(view.widthBreakpoint);
+      view.watch("widthBreakpoint", adapterMiseEnPage);
 
     });
 
@@ -411,18 +805,34 @@ css : https://developers.arcgis.com/javascript/latest/guide/styling/
 
 <body>
   <div id="viewDiv"></div>
-  <div id="logoDiv"><a href="https://www.esrifrance.fr/"><img src="./images/esri_france_emblem_tag_srgbrev.png" alt="Esri France" width="150" /></a></div>
+  <div id="logoDiv"><a href="https://www.esrifrance.fr/" target="_blank" rel="noopener noreferrer"><img
+        src="./images/esri_france_emblem_tag_srgbrev.png" alt="Esri France" width="150" height="45" /></a></div>
   <div id="timeSlider"></div>
   <div id="titleDiv" class="esri-widget">
-    <div id="titleText">Propagation du COVID-19 dans le monde</div>
+    <h1 id="titleText">Propagation du COVID-19 dans le monde</h1>
   </div>
-  
-  <div id="source" class="esri-widget" >
-    <div id="titleText">Web app built with <nobr><a style="color:orange;" href="https://developers.arcgis.com/javascript/">ArcGIS API for JavaScript</a></nobr> Source code :<a style="color:orange;" href="https://github.com/Sebastiensz/arcgis-javascript/tree/master/Covid19-spreading">Github</a></p>
+
+  <div id="loadingDiv" class="esri-widget">Chargement des données COVID-19…</div>
+
+  <div id="errorDiv" class="esri-widget" style="display:none">
+    Les données COVID-19 n'ont pas pu être chargées : le service qui les héberge
+    (Esri France) ne répond pas. Réessayez plus tard.
+  </div>
+
+  <div id="source" class="esri-widget">
+    <p>Web app built with
+      <span style="white-space: nowrap"><a style="color:orange;" href="https://developers.arcgis.com/javascript/"
+          target="_blank" rel="noopener noreferrer">ArcGIS API for JavaScript</a></span>
+      Source code :
+      <a style="color:orange;" href="https://github.com/Sebastiensz/arcgis-portfolio/tree/master/covid-19/covid19-spreading"
+        target="_blank" rel="noopener noreferrer">Github</a>
+    </p>
     <p>Data source:
-      <a style="color:orange;" href="https://ourworldindata.org/coronavirus-source-data"> Our World in Data</a>
-    </p> </div>
-    </div>
+      <a style="color:orange;" href="https://ourworldindata.org/coronavirus-source-data" target="_blank"
+        rel="noopener noreferrer">Our World in Data</a>
+      <br /><span id="dataEnd"></span>
+    </p>
+  </div>
 </body>
 
 </html>
