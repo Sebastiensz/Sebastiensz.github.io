@@ -2,14 +2,18 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CatNat Hub – Catastrophes Naturelles</title>
+
+  <link rel="preconnect" href="https://js.arcgis.com">
+  <link rel="preconnect" href="https://basemaps.arcgis.com">
 
   <!-- Chart.js doit être chargé AVANT ArcGIS pour éviter le conflit AMD (define.amd) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/dark/main.css">
-  <script src="https://js.arcgis.com/4.30/"></script>
+  <!-- onerror : si le CDN ArcGIS est injoignable, le reste de l'application doit rester utilisable -->
+  <script src="https://js.arcgis.com/4.30/" onerror="window.ARCGIS_FAILED = true;"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -67,7 +71,7 @@
     .stat-card .sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
 
     /* Main body */
-    #main { display: flex; flex: 1; overflow: hidden; }
+    #main { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
 
     /* Sidebar */
     #sidebar {
@@ -84,11 +88,18 @@
       padding: 3px 8px; border-radius: 12px; cursor: pointer;
       font-size: 11px; font-weight: 600; border: 1px solid transparent;
       transition: all 0.15s; opacity: 0.5;
+      font-family: inherit; background: transparent; line-height: 1.4;
     }
-    .chip.active { opacity: 1; }
+    .chip.active { opacity: 1; text-decoration: underline; }
+    .chip:focus-visible, .radio-btn:focus-visible, .chart-btn:focus-visible,
+    .tab:focus-visible, tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     input[type=range] { width: 100%; accent-color: var(--accent); }
-    .range-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+    /* Repères de l'échelle logarithmique : positionnés au pourcentage réel */
+    .range-labels { position: relative; height: 13px; font-size: 11px; color: var(--muted); }
+    .range-labels span { position: absolute; transform: translateX(-50%); }
+    .range-labels span:first-child { transform: none; }
+    .range-labels span:last-child  { transform: translateX(-100%); }
 
     select, input[type=text] {
       width: 100%; background: var(--card); border: 1px solid var(--border);
@@ -99,38 +110,41 @@
     .radio-btn {
       flex: 1; padding: 4px; text-align: center; border-radius: 4px;
       cursor: pointer; border: 1px solid var(--border); background: var(--card);
-      font-size: 11px; color: var(--muted); transition: all 0.15s;
+      font-size: 11px; color: var(--muted); transition: all 0.15s; font-family: inherit;
     }
     .radio-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
 
-    #franceNote {
+    #franceNote, #hazardNote {
       background: rgba(26,156,216,0.12); border: 1px solid rgba(26,156,216,0.3);
       border-radius: 6px; padding: 8px 10px; font-size: 11px; color: var(--muted);
       display: none; line-height: 1.5;
     }
-    #franceNote strong { color: var(--accent); display: block; margin-bottom: 4px; }
+    #franceNote strong, #hazardNote strong { color: var(--accent); display: block; margin-bottom: 4px; }
 
     /* Map area */
-    #mapWrap { flex: 1; position: relative; overflow: hidden; }
+    #mapWrap { flex: 1; position: relative; overflow: hidden; min-height: 0; }
     #viewDiv  { height: 100%; width: 100%; }
 
-    #mapOverlay {
-      position: absolute; top: 10px; right: 10px;
-      display: flex; flex-direction: column; gap: 6px; pointer-events: none;
+    /* Indicateur de chargement de la carte */
+    #mapLoading {
+      position: absolute; inset: 0; z-index: 40;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 10px; background: var(--bg); color: var(--muted); font-size: 12px; text-align: center; padding: 12px;
     }
-    .map-badge {
-      background: rgba(13,27,42,0.85); border: 1px solid var(--border);
-      border-radius: 6px; padding: 6px 10px; font-size: 11px; color: var(--muted);
-      pointer-events: all;
+    #mapLoading .spinner {
+      width: 30px; height: 30px; border: 3px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
     }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Legend */
-    #legend {
-      position: absolute; bottom: 30px; left: 10px;
-      background: rgba(13,27,42,0.9); border: 1px solid var(--border);
-      border-radius: 8px; padding: 10px 12px; font-size: 11px;
+    /* Bandeau d'avertissement (source indisponible) */
+    #warnBar {
+      display: none; flex-shrink: 0; gap: 8px; align-items: center;
+      background: rgba(232,155,58,0.14); border-bottom: 1px solid rgba(232,155,58,0.45);
+      color: var(--warn); padding: 7px 16px; font-size: 12px; line-height: 1.4;
     }
-    #legend h4 { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; letter-spacing: 0.5px; }
+    #warnBar.show { display: flex; }
+
     .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
     .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 
@@ -169,7 +183,10 @@
       font-size: 10px; font-weight: 700;
     }
     .num { text-align: right; font-variant-numeric: tabular-nums; }
-    .row-highlight { background: rgba(26,156,216,0.08) !important; }
+    .row-highlight { background: rgba(26,156,216,0.14) !important; box-shadow: inset 3px 0 0 var(--accent); }
+    /* Événement dont le périmètre est déjà compris dans un autre (non cumulé dans les totaux) */
+    .dup-mark { color: var(--warn); font-weight: 700; cursor: help; }
+    .empty-row td { color: var(--muted); text-align: center; padding: 18px 10px; font-style: italic; white-space: normal; }
 
     /* Données tab (full table) */
     #dataTab { display: none; flex-direction: column; flex: 1; overflow: hidden; }
@@ -212,23 +229,62 @@
     .chart-card h4 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; flex-shrink: 0; }
     .chart-inner { position: relative; flex: 1; min-height: 0; }
     .chart-toggle { display: flex; gap: 4px; }
-    .chart-btn { padding: 3px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); background: var(--card); font-size: 11px; color: var(--muted); transition: all 0.15s; }
+    .chart-btn { padding: 3px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--border); background: var(--card); font-size: 11px; color: var(--muted); transition: all 0.15s; font-family: inherit; }
     .chart-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
 
     /* Utility */
     .sep { border: none; border-top: 1px solid var(--border); margin: 4px 0; }
+
+    /* ── Mobile / petits écrans ──────────────────── */
+    /* La page défile verticalement au lieu d'être figée à 100vh :
+       sidebar, carte et tableau sont empilés et gardent une hauteur utile. */
+    @media (max-width: 768px) {
+      html, body { height: auto; }
+      #app { height: auto; min-height: 100vh; }
+      #header { height: auto; flex-wrap: wrap; gap: 8px; padding: 6px 10px; }
+      #header h1 { font-size: 15px; }
+      .tabs { order: 3; width: 100%; overflow-x: auto; gap: 2px; padding-bottom: 2px; }
+      /* Les 5 onglets doivent tenir dans la largeur : emojis décoratifs masqués */
+      .tab { padding: 6px 7px; white-space: nowrap; font-size: 12px; }
+      .tab span[aria-hidden] { display: none; }
+      #headerRight { display: none; }
+      #statsBar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 6px 10px; }
+      .stat-card { min-width: 0; padding: 4px 8px; }
+      .stat-card .value { font-size: 16px; }
+      #main { overflow: visible; }
+      #main > div { flex-direction: column; }
+      #sidebar { width: 100%; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+      /* Carte remontée juste sous les indicateurs, filtres en dessous */
+      #mapWrap { flex: none; height: 55vh; min-height: 280px; order: -1; }
+      #tablePanel { height: 320px; }
+      #tableSearch { width: 120px; }
+      #dataTab, #chartsTab { overflow: visible; }
+      #dataFiltersBar select, #dataFiltersBar input[type=text],
+      #dataFiltersBar input[type=number] { width: auto; flex: 1 1 120px; min-width: 0; }
+      .charts-header { flex-wrap: wrap; gap: 8px; }
+      .charts-header h3 { width: 100%; }
+      .charts-grid { flex-direction: column; overflow: visible; }
+      .chart-card { min-height: 280px; }
+    }
   </style>
 
   <script>
   // ════════════════════════════════════════════════════════
-  //  DATASET – 60 grands événements CatNat historiques
+  //  DATASET – 74 grands événements CatNat historiques
   //  Sources : Munich Re NatCatSERVICE, Swiss Re Sigma,
   //            EM-DAT, CCR, FFSA, NOAA, USGS
+  //  Valeurs indicatives (ordres de grandeur compilés à
+  //  partir de sources publiques), non contractuelles.
+  //
+  //  dup_of:<id> = événement dont le périmètre est déjà
+  //  compris dans l'événement <id> (même sinistre décrit à
+  //  une autre échelle). Affiché mais JAMAIS cumulé dans les
+  //  totaux, pour éviter les doubles comptes.
   // ════════════════════════════════════════════════════════
   var EVENTS = [
     // ── SÉISMES ─────────────────────────────────────────
     {id:1,  name:"Séisme du Shaanxi",           date:"1556-01-23", country:"Chine",               lat:34.5,  lng:109.7,  type:"earthquake", deaths:830000, injured:0,      eco:0,    ins:0,    mag:8.0, desc:"Plus grand nombre de morts d'un séisme dans l'histoire humaine"},
-    {id:2,  name:"Séisme de Lisbone",           date:"1755-11-01", country:"Portugal",             lat:38.7,  lng:-9.1,   type:"earthquake", deaths:60000,  injured:0,      eco:0,    ins:0,    mag:8.5, desc:"Détruit Lisbonne, déclenche un tsunami atlantique, accélère les Lumières"},
+    {id:2,  name:"Séisme de Lisbonne",          date:"1755-11-01", country:"Portugal",             lat:38.7,  lng:-9.1,   type:"earthquake", deaths:60000,  injured:0,      eco:0,    ins:0,    mag:8.5, desc:"Détruit Lisbonne, déclenche un tsunami atlantique, accélère les Lumières"},
     {id:3,  name:"Séisme de Tangshan",          date:"1976-07-28", country:"Chine",               lat:39.6,  lng:118.2,  type:"earthquake", deaths:242000, injured:164000, eco:5.6,  ins:0,    mag:7.8, desc:"Ville industrielle rasée en quelques secondes dans la nuit"},
     {id:4,  name:"Séisme de Mexico City",       date:"1985-09-19", country:"Mexique",             lat:19.4,  lng:-99.1,  type:"earthquake", deaths:9500,   injured:30000,  eco:5,    ins:0.1,  mag:8.1, desc:"Effondrement massif d'immeubles mal construits, mobilisation citoyenne historique"},
     {id:5,  name:"Séisme de Kobe",              date:"1995-01-17", country:"Japon",               lat:34.7,  lng:135.2,  type:"earthquake", deaths:6434,   injured:43792,  eco:100,  ins:3,    mag:6.9, desc:"Révèle la vulnérabilité sismique des infrastructures modernes"},
@@ -257,7 +313,7 @@
     {id:26, name:"Ouragan Irma",                date:"2017-09-06", country:"Antilles / USA",      lat:18.5,  lng:-66.1,  type:"cyclone", deaths:134,    injured:0,      eco:65,   ins:28,   desc:"Ouragan de catégorie 5, Saint-Martin français dévasté"},
     {id:27, name:"Cyclone Idai",                date:"2019-03-14", country:"Mozambique",          lat:-19.8, lng:34.9,   type:"cyclone", deaths:1300,   injured:0,      eco:2,    ins:0.15, desc:"Beira dévasté, tempête la plus meurtrière jamais enregistrée en Afrique australe"},
     {id:28, name:"Cyclone Amphan",              date:"2020-05-20", country:"Inde / Bangladesh",   lat:21.7,  lng:87.1,   type:"cyclone", deaths:128,    injured:0,      eco:14,   ins:0.3,  desc:"Super cyclone dans le golfe du Bengale, 5 millions d'évacuations"},
-    {id:29, name:"Irma – Antilles françaises",  date:"2017-09-06", country:"France (Saint-Martin)",lat:18.1, lng:-63.1,  type:"cyclone", deaths:14,     injured:50,     eco:3.8,  ins:2.1,  desc:"Saint-Martin et Saint-Barthélemy dévastés, 95% du bâti endommagé"},
+    {id:29, name:"Irma – Antilles françaises",  date:"2017-09-06", country:"France (Saint-Martin)",lat:18.1, lng:-63.1,  type:"cyclone", deaths:14,     injured:50,     eco:3.8,  ins:2.1,  dup_of:26, desc:"Saint-Martin et Saint-Barthélemy dévastés, 95% du bâti endommagé"},
 
     // ── INONDATIONS ──────────────────────────────────────
     {id:30, name:"Inondations Chine 1931",      date:"1931-07-01", country:"Chine",               lat:31.0,  lng:117.0,  type:"flood", deaths:3700000,injured:0,      eco:1,    ins:0,    desc:"La catastrophe naturelle la plus meurtrière du XXe siècle"},
@@ -270,7 +326,7 @@
     {id:37, name:"Inondations Aude 2018",       date:"2018-10-15", country:"France",              lat:43.2,  lng:2.5,    type:"flood", deaths:15,     injured:0,      eco:0.3,  ins:0.22, desc:"Villages du Minervois submergés en quelques heures"},
 
     // ── TSUNAMIS ─────────────────────────────────────────
-    {id:38, name:"Tsunami Océan Indien 2004",   date:"2004-12-26", country:"14 pays / Asie",      lat:5.0,   lng:80.0,   type:"tsunami", deaths:227898, injured:500000, eco:15,   ins:1,    desc:"14 pays touchés, côtes entières rasées, 1,7 million de déplacés"},
+    {id:38, name:"Tsunami Océan Indien 2004",   date:"2004-12-26", country:"14 pays / Asie",      lat:5.0,   lng:80.0,   type:"tsunami", deaths:227898, injured:500000, eco:15,   ins:1,    dup_of:7, desc:"14 pays touchés, côtes entières rasées, 1,7 million de déplacés (bilan commun avec le séisme de Sumatra)"},
 
     // ── VAGUES DE CHALEUR ────────────────────────────────
     {id:39, name:"Canicule Europe 2003",        date:"2003-08-01", country:"France / Europe",     lat:47.0,  lng:2.0,    type:"heatwave", deaths:70000, injured:0,      eco:13,   ins:1.5,  desc:"15 000 morts en France, réforme de la politique de prévention sanitaire"},
@@ -306,7 +362,7 @@
     {id:59, name:"Glissement d'Oso 2014",       date:"2014-03-22", country:"États-Unis",          lat:48.3,  lng:-121.8, type:"landslide", deaths:43,  injured:0,      eco:0.1,  ins:0.05, desc:"Glissement instantané emportant un quartier résidentiel dans l'État de Washington"},
 
     // ── France : régime CatNat spécifique ───────────────
-    {id:60, name:"Canicule France 2003",        date:"2003-08-01", country:"France",              lat:47.0,  lng:2.0,    type:"heatwave", deaths:15000,injured:0,      eco:4,    ins:1,    desc:"15 000 morts en France seule, réforme de la politique de prévention et du régime CatNat"},
+    {id:60, name:"Canicule France 2003",        date:"2003-08-01", country:"France",              lat:47.0,  lng:2.0,    type:"heatwave", deaths:15000,injured:0,      eco:4,    ins:1,    dup_of:39, desc:"15 000 morts en France seule, réforme de la politique de prévention et du régime CatNat"},
 
     // ── France : événements complémentaires ─────────────
     {id:61, name:"Séisme de Lambesc 1909",         date:"1909-06-11", country:"France",              lat:43.7,  lng:5.3,    type:"earthquake", deaths:46,   injured:250,   eco:0.05, ins:0,    mag:6.0, desc:"Premier grand séisme meurtrier de France métropolitaine, Lambesc et Salon-de-Provence dévastés"},
@@ -346,23 +402,87 @@
     storm:      "Tempête",    landslide: "Glissement"
   };
 
+  // ── Bornes temporelles calculées depuis les données ───
+  // (jamais figées en dur : un événement ajouté reste atteignable)
+  var YEARS    = EVENTS.map(function(e) { return +e.date.substring(0,4); });
+  var MIN_YEAR = Math.min.apply(null, YEARS);
+  var MAX_YEAR = Math.max.apply(null, YEARS);
+
   // ── État application ──────────────────────────────────
   var state = {
-    tab:       "monde",   // monde | france | hazard | data
+    tab:       "monde",   // monde | france | hazard | data | charts
     peril:     "all",
     sizeBy:    "eco",  // deaths | eco
-    yearMin:   1556,
-    yearMax:   2024,
-    minDeaths: 0,
-    search:    "",
-    sortCol:   "date",
-    sortDir:   -1
+    yearMin:   MIN_YEAR,
+    yearMax:   MAX_YEAR,
+    minDeaths: 0
   };
 
-  var layerView, blobUrl;
   var chartBar = null, chartPie = null, pieMetric = "eco";
-  var dataFilters = { peril: "all", country: "", yearMin: 1556, yearMax: 2024 };
+  var dataFilters = { peril: "all", country: "", yearMin: MIN_YEAR, yearMax: MAX_YEAR };
   var dataSortCol = "date", dataSortDir = -1;
+  var sortCol = "date", sortDir = -1;
+
+  // API carte : renseignée uniquement si le SDK ArcGIS a pu être chargé.
+  // Tout le reste de l'interface (stats, tableaux, filtres, graphiques)
+  // fonctionne sans elle — cf. dégradation gracieuse plus bas.
+  var mapApi = null, blobUrl = null;
+
+  // ── Doubles comptes ───────────────────────────────────
+  // Certains événements décrivent le même sinistre à une autre échelle
+  // (champ dup_of : « compris dans l'événement n° … »). Ils restent
+  // affichés, mais un seul des deux est cumulé dans les totaux — et
+  // uniquement lorsque les deux sont effectivement présents à l'écran.
+  function evtById(id) {
+    return EVENTS.filter(function(e) { return e.id === id; })[0];
+  }
+
+  /** Sur l'onglet France, on retient la déclinaison française plutôt que l'événement englobant. */
+  function frenchChildOf(e, list) {
+    return list.filter(function(x) {
+      return x.dup_of === e.id && x.country.indexOf("France") >= 0;
+    })[0];
+  }
+
+  /** Vrai si le périmètre de l'événement est déjà compté par un autre événement de la liste. */
+  function isDouble(e, list) {
+    list = list || getFiltered();
+    if (state.tab === "france") return !!frenchChildOf(e, list);
+    return !!e.dup_of && list.some(function(x) { return x.id === e.dup_of; });
+  }
+
+  function doubleNote(e, list) {
+    list = list || getFiltered();
+    if (state.tab === "france") {
+      var child = frenchChildOf(e, list);
+      return "Non cumulé ici : la part France est comptée via « " + (child ? child.name : "un autre événement") + " »";
+    }
+    var parent = evtById(e.dup_of);
+    return "Non cumulé : déjà compris dans « " + (parent ? parent.name : "un autre événement") + " »";
+  }
+
+  /** Échappement HTML — les libellés sont injectés via innerHTML. */
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  function dupCell(e, list) {
+    return isDouble(e, list)
+      ? ' <span class="dup-mark" title="' + esc(doubleNote(e, list)) + '">*</span>'
+      : '';
+  }
+
+  // ── Bandeau d'avertissement (source indisponible) ─────
+  var warnMsgs = [];
+  function showWarn(msg) {
+    if (warnMsgs.indexOf(msg) < 0) warnMsgs.push(msg);
+    var bar = document.getElementById("warnBar");
+    if (!bar) return;
+    bar.textContent = "⚠️ " + warnMsgs.join(" · ");
+    bar.classList.add("show");
+  }
 
   function renderDataTable() {
     var search = (document.getElementById("tableSearch2")||{}).value || "";
@@ -392,18 +512,22 @@
     if (cnt) cnt.textContent = filtered.length + " événement" + (filtered.length !== 1 ? "s" : "");
     var b2 = document.getElementById("evtBody2");
     if (!b2) return;
+    if (!filtered.length) {
+      b2.innerHTML = '<tr class="empty-row"><td colspan="9">Aucun événement pour ces filtres.</td></tr>';
+      return;
+    }
     b2.innerHTML = filtered.map(function(e) {
       var col = COLORS[e.type] || "#888";
       return '<tr>'
         + '<td>' + fmtDate(e.date) + '</td>'
-        + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">' + e.name + '</td>'
-        + '<td>' + e.country + '</td>'
-        + '<td><span class="type-badge" style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '40">' + (LABELS[e.type]||e.type) + '</span></td>'
+        + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis">' + esc(e.name) + dupCell(e, filtered) + '</td>'
+        + '<td>' + esc(e.country) + '</td>'
+        + '<td><span class="type-badge" style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '40">' + esc(LABELS[e.type]||e.type) + '</span></td>'
         + '<td class="num">' + (e.deaths ? e.deaths.toLocaleString("fr") : "–") + '</td>'
         + '<td class="num">' + (e.injured ? e.injured.toLocaleString("fr") : "–") + '</td>'
         + '<td class="num">' + fmtEco(e.eco) + '</td>'
         + '<td class="num">' + fmtEco(e.ins) + '</td>'
-        + '<td style="max-width:300px;white-space:normal;color:var(--muted);font-size:10px">' + e.desc + '</td>'
+        + '<td style="max-width:300px;white-space:normal;color:var(--muted);font-size:10px">' + esc(e.desc) + '</td>'
         + '</tr>';
     }).join("");
   }
@@ -411,10 +535,12 @@
   // ── Graphiques ────────────────────────────────────────
   function renderCharts(events) {
     if (typeof Chart === "undefined") return;
+    // Les événements en double compte sont exclus des agrégats
+    var agg = events.filter(function(e) { return !isDouble(e, events); });
 
     // — Courbe sinistralité par année —
     var byYear = {};
-    events.forEach(function(e) {
+    agg.forEach(function(e) {
       var y = +e.date.substring(0,4);
       if (!byYear[y]) byYear[y] = { eco: 0, ins: 0, deaths: 0 };
       byYear[y].eco    += e.eco    || 0;
@@ -438,7 +564,11 @@
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { labels: { color: "#d4e3f0", font: { size: 11 }, boxWidth: 14 } } },
+        plugins: {
+          legend: { labels: { color: "#d4e3f0", font: { size: 11 }, boxWidth: 14 } },
+          subtitle: { display: true, color: "#7a99b2", font: { size: 10 },
+            text: "Seules les années comportant un événement du jeu de données sont représentées (axe non linéaire)" }
+        },
         scales: {
           x: { stacked: true, ticks: { color: "#7a99b2", font: { size: 10 }, maxRotation: 45 }, grid: { color: "rgba(37,58,80,0.6)" } },
           y: { stacked: true, ticks: { color: "#7a99b2", font: { size: 10 } }, grid: { color: "rgba(37,58,80,0.6)" },
@@ -449,7 +579,7 @@
 
     // — Camembert par péril —
     var byPeril = {};
-    events.forEach(function(e) {
+    agg.forEach(function(e) {
       if (!byPeril[e.type]) byPeril[e.type] = { count: 0, deaths: 0, eco: 0 };
       byPeril[e.type].count++;
       byPeril[e.type].deaths += e.deaths || 0;
@@ -491,11 +621,6 @@
       var y = +e.date.substring(0,4);
       if (y < state.yearMin || y > state.yearMax) return false;
       if (e.deaths < state.minDeaths) return false;
-      if (state.search) {
-        var s = state.search.toLowerCase();
-        if (e.name.toLowerCase().indexOf(s) < 0 &&
-            e.country.toLowerCase().indexOf(s) < 0) return false;
-      }
       return true;
     });
   }
@@ -509,14 +634,288 @@
   function fmtEco(v) { return v ? v.toFixed(1) + " Md$" : "–"; }
   function fmtDate(d) { return d.substring(0,4) + (d.length > 4 ? " / " + d.substring(5,7) : ""); }
 
+  // ── Stats bar ─────────────────────────────────────────
+  function updateStats(events) {
+    var agg    = events.filter(function(e) { return !isDouble(e, events); });
+    var nDup   = events.length - agg.length;
+    var deaths = agg.reduce(function(s,e) { return s + (e.deaths||0); }, 0);
+    var eco    = agg.reduce(function(s,e) { return s + (e.eco||0); }, 0);
+    var ins    = agg.reduce(function(s,e) { return s + (e.ins||0); }, 0);
+    var gap    = eco > 0 ? Math.round((1 - ins/eco)*100) : 0;
+    document.getElementById("stNb").textContent     = events.length;
+    document.getElementById("stDeaths").textContent = fmt(deaths);
+    document.getElementById("stEco").textContent    = eco.toFixed(0) + " Md$";
+    document.getElementById("stIns").textContent    = ins.toFixed(0) + " Md$";
+    document.getElementById("stGap").textContent    = gap + "%";
+    document.getElementById("stNbSub").textContent  = nDup
+      ? "filtrés · " + nDup + " non cumulé" + (nDup > 1 ? "s" : "")
+      : "filtrés";
+  }
+
+  // ── Tableau Historique ────────────────────────────────
+  function renderTable(events) {
+    var search = (document.getElementById("tableSearch")||{}).value || "";
+    var filtered = events.filter(function(e) {
+      if (!search) return true;
+      return e.name.toLowerCase().indexOf(search.toLowerCase()) >= 0 ||
+             e.country.toLowerCase().indexOf(search.toLowerCase()) >= 0;
+    });
+    filtered.sort(function(a, b) {
+      var va = a[sortCol] !== undefined ? a[sortCol] : a.date;
+      var vb = b[sortCol] !== undefined ? b[sortCol] : b.date;
+      if (va < vb) return sortDir;
+      if (va > vb) return -sortDir;
+      return 0;
+    });
+
+    var b1 = document.getElementById("evtBody");
+    if (!b1) return;
+    if (!filtered.length) {
+      b1.innerHTML = '<tr class="empty-row"><td colspan="8">Aucun événement pour ces filtres.</td></tr>';
+      return;
+    }
+    b1.innerHTML = filtered.map(function(e) {
+      var col = COLORS[e.type] || "#888";
+      return '<tr tabindex="0" data-id="' + e.id + '">'
+        + '<td>' + fmtDate(e.date) + '</td>'
+        + '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc(e.name) + dupCell(e, events) + '</td>'
+        + '<td>' + esc(e.country.substring(0,18)) + '</td>'
+        + '<td><span class="type-badge" style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '40">' + esc(LABELS[e.type]||e.type) + '</span></td>'
+        + '<td class="num">' + fmt(e.deaths) + '</td>'
+        + '<td class="num">' + fmt(e.injured) + '</td>'
+        + '<td class="num">' + fmtEco(e.eco) + '</td>'
+        + '<td class="num">' + fmtEco(e.ins) + '</td>'
+        + '</tr>';
+    }).join("");
+  }
+
+  /** Sélectionne une ligne : surlignage + recentrage et popup si la carte est disponible. */
+  function highlightEvent(id, row) {
+    document.querySelectorAll("#evtBody tr").forEach(function(tr) { tr.classList.remove("row-highlight"); });
+    if (row) row.classList.add("row-highlight");
+    if (mapApi) mapApi.focusEvent(id);
+  }
+
+  /** Recalcule tout ce qui dépend des filtres (stats, tableau, graphiques, carte). */
+  function refresh() {
+    var events = getFiltered();
+    updateStats(events);
+    renderTable(events);
+    if (state.tab === "charts") renderCharts(events);
+    if (mapApi) mapApi.applyFilter();
+    return events;
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  Interface (indépendante du SDK ArcGIS)
+  // ══════════════════════════════════════════════════════
+  function initUI() {
+    // — Bornes des filtres alignées sur les données —
+    var slMin = document.getElementById("slMin"), slMax = document.getElementById("slMax");
+    var lbMin = document.getElementById("lbMin"), lbMax = document.getElementById("lbMax");
+    slMin.min = slMax.min = MIN_YEAR;
+    slMin.max = slMax.max = MAX_YEAR;
+    slMin.value = MIN_YEAR; slMax.value = MAX_YEAR;
+    lbMin.textContent = MIN_YEAR; lbMax.textContent = MAX_YEAR;
+    var dfMin = document.getElementById("dfYearMin"), dfMax = document.getElementById("dfYearMax");
+    dfMin.min = dfMax.min = MIN_YEAR;
+    dfMin.max = dfMax.max = MAX_YEAR;
+    dfMin.value = MIN_YEAR; dfMax.value = MAX_YEAR;
+
+    // — Tri du tableau Historique —
+    document.querySelectorAll("thead th[data-col]").forEach(function(th) {
+      th.addEventListener("click", function() {
+        var col = this.getAttribute("data-col");
+        if (sortCol === col) sortDir *= -1;
+        else { sortCol = col; sortDir = -1; }
+        document.querySelectorAll("thead th").forEach(function(t) { t.classList.remove("sorted"); });
+        this.classList.add("sorted");
+        renderTable(getFiltered());
+      });
+    });
+
+    // — Sélection d'une ligne (souris + clavier) —
+    var evtBody = document.getElementById("evtBody");
+    evtBody.addEventListener("click", function(ev) {
+      var tr = ev.target.closest("tr[data-id]");
+      if (tr) highlightEvent(+tr.getAttribute("data-id"), tr);
+    });
+    evtBody.addEventListener("keydown", function(ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      var tr = ev.target.closest("tr[data-id]");
+      if (!tr) return;
+      ev.preventDefault();
+      highlightEvent(+tr.getAttribute("data-id"), tr);
+    });
+
+    // — Recherches (chaque onglet a la sienne) —
+    document.getElementById("tableSearch").addEventListener("input", function() {
+      renderTable(getFiltered());
+    });
+    document.getElementById("tableSearch2").addEventListener("input", renderDataTable);
+
+    // — Filtres onglet Données —
+    document.getElementById("dfPeril").addEventListener("change", function() {
+      dataFilters.peril = this.value; renderDataTable();
+    });
+    document.getElementById("dfCountry").addEventListener("input", function() {
+      dataFilters.country = this.value; renderDataTable();
+    });
+    document.getElementById("dfYearMin").addEventListener("change", function() {
+      dataFilters.yearMin = +this.value; renderDataTable();
+    });
+    document.getElementById("dfYearMax").addEventListener("change", function() {
+      dataFilters.yearMax = +this.value; renderDataTable();
+    });
+    document.getElementById("dfReset").addEventListener("click", function() {
+      dataFilters = { peril: "all", country: "", yearMin: MIN_YEAR, yearMax: MAX_YEAR };
+      document.getElementById("dfPeril").value   = "all";
+      document.getElementById("dfCountry").value = "";
+      dfMin.value = MIN_YEAR;
+      dfMax.value = MAX_YEAR;
+      document.getElementById("tableSearch2").value = "";
+      renderDataTable();
+    });
+
+    // — Tri colonnes onglet Données —
+    document.querySelectorAll("th[data-dcol]").forEach(function(th) {
+      th.addEventListener("click", function() {
+        var col = this.getAttribute("data-dcol");
+        if (dataSortCol === col) dataSortDir *= -1;
+        else { dataSortCol = col; dataSortDir = -1; }
+        document.querySelectorAll("th[data-dcol]").forEach(function(t) { t.classList.remove("dsorted"); });
+        this.classList.add("dsorted");
+        renderDataTable();
+      });
+    });
+
+    // — Onglets —
+    document.querySelectorAll(".tab").forEach(function(t) {
+      t.addEventListener("click", function() {
+        state.tab = this.getAttribute("data-tab");
+        document.querySelectorAll(".tab").forEach(function(x) {
+          x.classList.remove("active");
+          x.setAttribute("aria-selected", "false");
+        });
+        this.classList.add("active");
+        this.setAttribute("aria-selected", "true");
+
+        var isFrance = state.tab === "france";
+        document.getElementById("franceNote").style.display = isFrance ? "block" : "none";
+        document.getElementById("hazardNote").style.display = state.tab === "hazard" ? "block" : "none";
+        var mapVisible = state.tab !== "data" && state.tab !== "charts";
+        document.getElementById("main").style.display = mapVisible ? "flex" : "none";
+        document.getElementById("dataTab").classList.toggle("active", state.tab === "data");
+        document.getElementById("chartsTab").classList.toggle("active", state.tab === "charts");
+        if (state.tab === "data") renderDataTable();
+        if (mapApi) mapApi.goToTab(state.tab);
+        refresh();
+      });
+    });
+
+    // — Filtre péril —
+    document.querySelectorAll(".chip[data-peril]").forEach(function(c) {
+      c.addEventListener("click", function() {
+        state.peril = this.getAttribute("data-peril");
+        document.querySelectorAll(".chip[data-peril]").forEach(function(x) {
+          var on = x.getAttribute("data-peril") === state.peril;
+          x.classList.toggle("active", on);
+          x.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        refresh();
+      });
+    });
+
+    // — Sliders années (bornés l'un par l'autre) —
+    function updateYear(fromMin) {
+      var a = +slMin.value, b = +slMax.value;
+      if (a > b) {
+        if (fromMin) { b = a; slMax.value = a; }
+        else         { a = b; slMin.value = b; }
+      }
+      state.yearMin = a; state.yearMax = b;
+      lbMin.textContent = a; lbMax.textContent = b;
+      refresh();
+    }
+    slMin.addEventListener("input", function() { updateYear(true); });
+    slMax.addEventListener("input", function() { updateYear(false); });
+
+    // — Slider morts (échelle log, 0 inclus) —
+    var slDeaths = document.getElementById("slDeaths");
+    var lbDeaths = document.getElementById("lbDeaths");
+    slDeaths.addEventListener("input", function() {
+      var v   = +this.value;
+      var val = v <= 0 ? 0 : Math.round(Math.pow(10, v));
+      state.minDeaths = val;
+      lbDeaths.textContent = val >= 1000 ? (val/1000).toFixed(0)+"k+" : val+"+";
+      refresh();
+    });
+
+    // — Taille des symboles —
+    document.querySelectorAll(".radio-btn[data-size]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        state.sizeBy = this.getAttribute("data-size");
+        document.querySelectorAll(".radio-btn[data-size]").forEach(function(x) {
+          var on = x.getAttribute("data-size") === state.sizeBy;
+          x.classList.toggle("active", on);
+          x.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        if (mapApi) mapApi.setRenderer();
+      });
+    });
+
+    // — Métrique du camembert —
+    document.querySelectorAll(".chart-btn[data-pie]").forEach(function(b) {
+      b.addEventListener("click", function() {
+        pieMetric = this.getAttribute("data-pie");
+        document.querySelectorAll(".chart-btn[data-pie]").forEach(function(x) {
+          var on = x.getAttribute("data-pie") === pieMetric;
+          x.classList.toggle("active", on);
+          x.setAttribute("aria-pressed", on ? "true" : "false");
+        });
+        renderCharts(getFiltered());
+      });
+    });
+
+    // — État initial —
+    document.querySelector(".chip[data-peril='all']").classList.add("active");
+    document.querySelector(".chip[data-peril='all']").setAttribute("aria-pressed", "true");
+    document.querySelector(".radio-btn[data-size='eco']").classList.add("active");
+    document.querySelector(".radio-btn[data-size='eco']").setAttribute("aria-pressed", "true");
+    document.querySelector(".tab[data-tab='monde']").classList.add("active");
+    document.querySelector(".tab[data-tab='monde']").setAttribute("aria-selected", "true");
+
+    refresh();
+    renderDataTable();
+
+    // — Dégradation gracieuse : le SDK ArcGIS n'a pas pu être chargé —
+    if (window.ARCGIS_FAILED || typeof require === "undefined") {
+      showWarn("Carte indisponible (CDN ArcGIS injoignable) : les tableaux, filtres et graphiques restent consultables.");
+      var ml = document.getElementById("mapLoading");
+      if (ml) ml.innerHTML = '<div><b>Carte indisponible</b><br>CDN ArcGIS injoignable</div>';
+      var hc = document.getElementById("hazardCount");
+      if (hc) hc.textContent = "Aléa sismique non chargé (carte indisponible).";
+    }
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initUI);
+  else initUI();
+
+  // ══════════════════════════════════════════════════════
+  //  Carte (uniquement si le SDK ArcGIS est disponible)
+  // ══════════════════════════════════════════════════════
+  if (typeof require !== "undefined" && !window.ARCGIS_FAILED) {
   require([
     "esri/Map", "esri/views/MapView",
     "esri/layers/GeoJSONLayer", "esri/widgets/Home",
-    "esri/widgets/Legend", "esri/widgets/Expand",
-    "esri/widgets/BasemapGallery"
-  ], function(Map, MapView, GeoJSONLayer, Home, Legend, Expand, BasemapGallery) {
+    "esri/widgets/Expand", "esri/widgets/BasemapGallery"
+  ], function(Map, MapView, GeoJSONLayer, Home, Expand, BasemapGallery) {
 
-    var map = new Map({ basemap: "dark-gray-vector" });
+    var BASEMAP_MONDE  = "dark-gray-vector";
+    var BASEMAP_ALEAS  = "gray-vector";
+    var currentBasemap = BASEMAP_MONDE;
+
+    var map = new Map({ basemap: BASEMAP_MONDE });
     var view = new MapView({
       container: "viewDiv", map: map,
       zoom: 2, center: [10, 20],
@@ -526,15 +925,22 @@
     view.ui.move("zoom", "top-left");
     view.ui.add(new Home({ view: view }), "top-left");
 
+    // Popup ancré (docké) quand la carte est basse ou étroite : ancré au-dessus
+    // du point, son en-tête sortait de la zone carte et n'était plus cliquable.
+    view.popup.dockEnabled = true;
+    view.popup.dockOptions = {
+      buttonEnabled: true,
+      position: "bottom-right",
+      breakpoint: { width: 600, height: 700 }
+    };
+
     var bgExpand = new Expand({
-      view: view, expandIconClass: "esri-icon-basemap",
+      view: view, icon: "basemap",
       content: new BasemapGallery({ view: view }), expanded: false
     });
     view.ui.add(bgExpand, "top-left");
 
-    var layer;
-
-    // ── Construction GeoJSONLayer depuis blob ─────────────
+    // ── Construction de la couche (une seule fois) ────────
     function buildLayer(events) {
       var geojson = {
         type: "FeatureCollection",
@@ -544,7 +950,9 @@
             geometry: { type: "Point", coordinates: [e.lng, e.lat] },
             properties: {
               id: e.id, name: e.name, evt_date: e.date,
+              year: +e.date.substring(0,4),
               country: e.country, type: e.type,
+              fr: e.country.indexOf("France") >= 0 ? 1 : 0,
               deaths: e.deaths, injured: e.injured || 0,
               eco: e.eco || 0, ins: e.ins || 0,
               mag: e.mag || 0, desc: e.desc
@@ -558,6 +966,7 @@
       );
       return new GeoJSONLayer({
         url: blobUrl,
+        title: "Événements CatNat",
         outFields: ["*"],
         renderer: buildRenderer(),
         popupTemplate: {
@@ -566,17 +975,19 @@
           content: function(e) {
             var a = e.graphic.attributes;
             var color = COLORS[a.type] || "#888";
+            var evt = evtById(a.id), shown = getFiltered();
             return '<div style="font-size:12px;line-height:1.6">'
-              + '<span style="background:' + color + ';padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700;color:white">' + (LABELS[a.type]||a.type) + '</span>'
-              + '<br><b>📅 Date :</b> ' + (typeof a.evt_date === "number" ? new Date(a.evt_date).toLocaleDateString("fr-FR", {year:"numeric",month:"long",day:"numeric"}) : a.evt_date)
-              + '<br><b>🌍 Pays :</b> ' + a.country
+              + '<span style="background:' + color + ';padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700;color:white">' + esc(LABELS[a.type]||a.type) + '</span>'
+              + '<br><b>📅 Date :</b> ' + (typeof a.evt_date === "number" ? new Date(a.evt_date).toLocaleDateString("fr-FR", {year:"numeric",month:"long",day:"numeric"}) : esc(a.evt_date))
+              + '<br><b>🌍 Pays :</b> ' + esc(a.country)
               + '<br><b>💀 Morts :</b> ' + (a.deaths ? a.deaths.toLocaleString("fr") : "N/D")
               + '<br><b>🤕 Blessés :</b> ' + (a.injured ? a.injured.toLocaleString("fr") : "N/D")
               + '<br><b>💸 Pertes éco. :</b> ' + (a.eco ? a.eco.toFixed(1) + ' Md$' : 'N/D')
               + '<br><b>🔒 Pertes assurées :</b> ' + (a.ins ? a.ins.toFixed(1) + ' Md$' : 'N/D')
               + (a.mag ? '<br><b>📐 Magnitude :</b> ' + a.mag : '')
+              + (evt && isDouble(evt, shown) ? '<br><b style="color:#e89b3a">⚠️ ' + esc(doubleNote(evt, shown)) + '</b>' : '')
               + '<hr style="border-color:#444;margin:6px 0">'
-              + '<i style="color:#aaa">' + a.desc + '</i>'
+              + '<i style="color:#aaa">' + esc(a.desc) + '</i>'
               + '</div>';
           }
         }
@@ -609,214 +1020,131 @@
       };
     }
 
-    // ── Rechargement de la couche ─────────────────────────
-    function reloadLayer() {
-      var events = getFiltered();
-      if (layer) map.remove(layer);
-      layer = buildLayer(events);
-      map.add(layer);
-      updateStats(events);
-      renderTable(events);
-      if (state.tab === "charts") renderCharts(events);
+    /** Filtre SQL appliqué à la couche — évite de reconstruire le blob à chaque input. */
+    function filterExpression() {
+      var w = [
+        "year >= " + state.yearMin,
+        "year <= " + state.yearMax,
+        "deaths >= " + state.minDeaths
+      ];
+      if (state.peril !== "all") w.push("type = '" + state.peril + "'");
+      if (state.tab === "france") w.push("fr = 1");
+      return w.join(" AND ");
     }
 
-    // ── Stats bar ─────────────────────────────────────────
-    function updateStats(events) {
-      var deaths = events.reduce(function(s,e) { return s + (e.deaths||0); }, 0);
-      var eco    = events.reduce(function(s,e) { return s + (e.eco||0); }, 0);
-      var ins    = events.reduce(function(s,e) { return s + (e.ins||0); }, 0);
-      var gap    = eco > 0 ? Math.round((1 - ins/eco)*100) : 0;
-      document.getElementById("stNb").textContent    = events.length;
-      document.getElementById("stDeaths").textContent = fmt(deaths);
-      document.getElementById("stEco").textContent    = eco.toFixed(0) + " Md$";
-      document.getElementById("stIns").textContent    = ins.toFixed(0) + " Md$";
-      document.getElementById("stGap").textContent    = gap + "%";
+    var layer = buildLayer(EVENTS);
+    layer.definitionExpression = filterExpression();
+    map.add(layer);
+
+    // ── Aléa sismique observé (source USGS) ───────────────
+    var USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_month.geojson";
+    var hazardLayer = null, hazardBlob = null, hazardAsked = false;
+
+    function ensureHazardLayer() {
+      if (hazardAsked) { if (hazardLayer) hazardLayer.visible = true; return; }
+      hazardAsked = true;
+      fetch(USGS_URL)
+        .then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then(function(fc) {
+          // Propriétés réduites à ce qui est affiché (typage des champs fiable)
+          var feats = (fc.features || []).map(function(f) {
+            var pr = f.properties || {};
+            return {
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [f.geometry.coordinates[0], f.geometry.coordinates[1]] },
+              properties: {
+                mag:   pr.mag || 0,
+                place: pr.place || "",
+                depth: f.geometry.coordinates[2] || 0,
+                when:  new Date(pr.time).toLocaleDateString("fr-FR", {year:"numeric",month:"long",day:"numeric"})
+              }
+            };
+          });
+          hazardBlob = URL.createObjectURL(new Blob(
+            [JSON.stringify({ type: "FeatureCollection", features: feats })],
+            { type: "application/json" }
+          ));
+          hazardLayer = new GeoJSONLayer({
+            url: hazardBlob,
+            title: "Séismes M4.5+ – 30 derniers jours (USGS)",
+            copyright: "USGS Earthquake Hazards Program",
+            outFields: ["*"],
+            visible: state.tab === "hazard",
+            renderer: {
+              type: "simple",
+              symbol: { type: "simple-marker", color: [229,83,83,0.35], size: 6,
+                outline: { color: [229,83,83,0.9], width: 0.8 } },
+              visualVariables: [{
+                type: "size", field: "mag",
+                stops: [{value:4.5, size:5}, {value:6, size:14}, {value:7.5, size:28}]
+              }]
+            },
+            popupTemplate: {
+              title: "Séisme M{mag}",
+              content: "<div style='font-size:12px;line-height:1.6'>"
+                + "<b>Lieu :</b> {place}<br><b>Date :</b> {when}<br><b>Profondeur :</b> {depth} km"
+                + "<hr style='border-color:#444;margin:6px 0'>"
+                + "<i style='color:#aaa'>Source : USGS Earthquake Hazards Program</i></div>"
+            }
+          });
+          map.add(hazardLayer, 0);
+          var n = document.getElementById("hazardCount");
+          if (n) n.textContent = feats.length + " séismes M4.5+ sur les 30 derniers jours";
+        })
+        .catch(function() {
+          showWarn("Aléa sismique indisponible (flux USGS injoignable) : les événements historiques restent affichés.");
+          var n = document.getElementById("hazardCount");
+          if (n) n.textContent = "Flux USGS indisponible.";
+        });
     }
 
-    // ── Tableau ───────────────────────────────────────────
-    var sortCol = "date", sortDir = -1;
-    function renderTable(events) {
-      var search = (document.getElementById("tableSearch")||{}).value
-                || (document.getElementById("tableSearch2")||{}).value || "";
-      var filtered = events.filter(function(e) {
-        if (!search) return true;
-        return e.name.toLowerCase().indexOf(search.toLowerCase()) >= 0 ||
-               e.country.toLowerCase().indexOf(search.toLowerCase()) >= 0;
-      });
-      filtered.sort(function(a, b) {
-        var va = a[sortCol] !== undefined ? a[sortCol] : a.date;
-        var vb = b[sortCol] !== undefined ? b[sortCol] : b.date;
-        if (va < vb) return sortDir;
-        if (va > vb) return -sortDir;
-        return 0;
-      });
-
-      var b1 = document.getElementById("evtBody");
-      if (b1) b1.innerHTML = filtered.map(function(e) {
-        var col = COLORS[e.type] || "#888";
-        return '<tr onclick="highlightEvent(' + e.id + ')">'
-          + '<td>' + fmtDate(e.date) + '</td>'
-          + '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">' + e.name + '</td>'
-          + '<td>' + e.country.substring(0,18) + '</td>'
-          + '<td><span class="type-badge" style="background:' + col + '20;color:' + col + ';border:1px solid ' + col + '40">' + (LABELS[e.type]||e.type) + '</span></td>'
-          + '<td class="num">' + fmt(e.deaths) + '</td>'
-          + '<td class="num">' + fmt(e.injured) + '</td>'
-          + '<td class="num">' + fmtEco(e.eco) + '</td>'
-          + '<td class="num">' + fmtEco(e.ins) + '</td>'
-          + '</tr>';
-      }).join("");
-    }
-
-    window.highlightEvent = function(id) {
-      var e = EVENTS.find(function(x){ return x.id===id; });
-      if (!e) return;
-      view.goTo({ center: [e.lng, e.lat], zoom: 5 });
+    // ── API exposée au reste de l'interface ───────────────
+    mapApi = {
+      applyFilter: function() { layer.definitionExpression = filterExpression(); },
+      setRenderer: function() { layer.renderer = buildRenderer(); },
+      focusEvent: function(id) {
+        var e = evtById(id);
+        if (!e) return;
+        view.goTo({ center: [e.lng, e.lat], zoom: 5 })
+          .then(function() {
+            return layer.queryFeatures({ where: "id = " + id, outFields: ["*"], returnGeometry: true });
+          })
+          .then(function(res) {
+            if (res && res.features && res.features.length) {
+              view.openPopup({ features: res.features, location: res.features[0].geometry });
+            }
+          })
+          .catch(function() { /* animation interrompue : sans conséquence */ });
+      },
+      goToTab: function(tab) {
+        var wanted = tab === "hazard" ? BASEMAP_ALEAS : BASEMAP_MONDE;
+        var target = tab === "france" ? { center: [2, 46], zoom: 5 } : { center: [10, 20], zoom: 2 };
+        var mapVisible = tab !== "data" && tab !== "charts";
+        var anim = mapVisible ? view.goTo(target) : Promise.resolve();
+        Promise.resolve(anim)
+          .then(function() {
+            // Fond changé après l'animation, et seulement s'il change réellement
+            if (currentBasemap !== wanted) { currentBasemap = wanted; map.basemap = wanted; }
+          })
+          .catch(function() {});
+        if (hazardLayer) hazardLayer.visible = (tab === "hazard");
+        if (tab === "hazard") ensureHazardLayer();
+      }
     };
 
-    // ── Tri des colonnes ──────────────────────────────────
-    document.querySelectorAll("thead th[data-col]").forEach(function(th) {
-      th.addEventListener("click", function() {
-        var col = this.getAttribute("data-col");
-        if (sortCol === col) sortDir *= -1;
-        else { sortCol = col; sortDir = -1; }
-        document.querySelectorAll("thead th").forEach(function(t) { t.classList.remove("sorted"); });
-        this.classList.add("sorted");
-        renderTable(getFiltered());
-      });
+    view.when(function() {
+      var ml = document.getElementById("mapLoading");
+      if (ml) ml.style.display = "none";
+    }, function() {
+      showWarn("La carte n'a pas pu être initialisée : les tableaux et graphiques restent consultables.");
+      var ml = document.getElementById("mapLoading");
+      if (ml) ml.innerHTML = '<div><b>Carte indisponible</b></div>';
     });
-
-    document.getElementById("tableSearch").addEventListener("input", function() {
-      renderTable(getFiltered());
-    });
-    document.getElementById("tableSearch2").addEventListener("input", renderDataTable);
-
-    // ── Filtres onglet Données ────────────────────────────
-    document.getElementById("dfPeril").addEventListener("change", function() {
-      dataFilters.peril = this.value; renderDataTable();
-    });
-    document.getElementById("dfCountry").addEventListener("input", function() {
-      dataFilters.country = this.value; renderDataTable();
-    });
-    document.getElementById("dfYearMin").addEventListener("change", function() {
-      dataFilters.yearMin = +this.value; renderDataTable();
-    });
-    document.getElementById("dfYearMax").addEventListener("change", function() {
-      dataFilters.yearMax = +this.value; renderDataTable();
-    });
-    document.getElementById("dfReset").addEventListener("click", function() {
-      dataFilters = { peril: "all", country: "", yearMin: 1556, yearMax: 2024 };
-      document.getElementById("dfPeril").value   = "all";
-      document.getElementById("dfCountry").value = "";
-      document.getElementById("dfYearMin").value = 1556;
-      document.getElementById("dfYearMax").value = 2024;
-      document.getElementById("tableSearch2").value = "";
-      renderDataTable();
-    });
-
-    // ── Tri colonnes onglet Données ───────────────────────
-    document.querySelectorAll("th[data-dcol]").forEach(function(th) {
-      th.addEventListener("click", function() {
-        var col = this.getAttribute("data-dcol");
-        if (dataSortCol === col) dataSortDir *= -1;
-        else { dataSortCol = col; dataSortDir = -1; }
-        document.querySelectorAll("th[data-dcol]").forEach(function(t) { t.classList.remove("dsorted"); });
-        this.classList.add("dsorted");
-        renderDataTable();
-      });
-    });
-
-    // ── Tabs ──────────────────────────────────────────────
-    document.querySelectorAll(".tab").forEach(function(t) {
-      t.addEventListener("click", function() {
-        state.tab = this.getAttribute("data-tab");
-        document.querySelectorAll(".tab").forEach(function(x){ x.classList.remove("active"); });
-        this.classList.add("active");
-
-        var isFrance = state.tab === "france";
-        document.getElementById("franceNote").style.display = isFrance ? "block" : "none";
-        var mapVisible = state.tab !== "data" && state.tab !== "charts";
-        document.getElementById("main").style.display = mapVisible ? "flex" : "none";
-        document.getElementById("dataTab").classList.toggle("active", state.tab === "data");
-        document.getElementById("chartsTab").classList.toggle("active", state.tab === "charts");
-        if (state.tab === "data")   renderDataTable();
-        if (state.tab === "charts") renderCharts(getFiltered());
-
-        if (isFrance) view.goTo({ center: [2, 46], zoom: 5 });
-        else if (state.tab === "monde") view.goTo({ center: [10, 20], zoom: 2 });
-        else if (state.tab === "hazard") {
-          map.basemap = "gray-vector";
-          view.goTo({ center: [10, 20], zoom: 2 });
-        }
-        if (state.tab !== "hazard") map.basemap = "dark-gray-vector";
-
-        reloadLayer();
-      });
-    });
-
-    // ── Filtre péril ──────────────────────────────────────
-    document.querySelectorAll(".chip[data-peril]").forEach(function(c) {
-      c.addEventListener("click", function() {
-        state.peril = this.getAttribute("data-peril");
-        document.querySelectorAll(".chip[data-peril]").forEach(function(x){
-          x.classList.toggle("active", x.getAttribute("data-peril") === state.peril);
-        });
-        reloadLayer();
-      });
-    });
-
-    // ── Slider années ─────────────────────────────────────
-    var slMin = document.getElementById("slMin");
-    var slMax = document.getElementById("slMax");
-    var lbMin = document.getElementById("lbMin");
-    var lbMax = document.getElementById("lbMax");
-    function updateYear() {
-      state.yearMin = +slMin.value;
-      state.yearMax = +slMax.value;
-      lbMin.textContent = slMin.value;
-      lbMax.textContent = slMax.value;
-      reloadLayer();
-    }
-    slMin.addEventListener("input", updateYear);
-    slMax.addEventListener("input", updateYear);
-
-    // ── Slider morts ─────────────────────────────────────
-    var slDeaths = document.getElementById("slDeaths");
-    var lbDeaths = document.getElementById("lbDeaths");
-    slDeaths.addEventListener("input", function() {
-      var val = Math.round(Math.pow(10, +this.value));
-      state.minDeaths = val;
-      lbDeaths.textContent = val >= 1000 ? (val/1000).toFixed(0)+"k+" : val+"+";
-      reloadLayer();
-    });
-
-    // ── Size by toggle ────────────────────────────────────
-    document.querySelectorAll(".radio-btn[data-size]").forEach(function(b) {
-      b.addEventListener("click", function() {
-        state.sizeBy = this.getAttribute("data-size");
-        document.querySelectorAll(".radio-btn[data-size]").forEach(function(x){
-          x.classList.toggle("active", x.getAttribute("data-size") === state.sizeBy);
-        });
-        if (layer) layer.renderer = buildRenderer();
-      });
-    });
-
-    // ── Pie metric toggle ─────────────────────────────────
-    document.querySelectorAll(".chart-btn[data-pie]").forEach(function(b) {
-      b.addEventListener("click", function() {
-        pieMetric = this.getAttribute("data-pie");
-        document.querySelectorAll(".chart-btn[data-pie]").forEach(function(x) {
-          x.classList.toggle("active", x.getAttribute("data-pie") === pieMetric);
-        });
-        renderCharts(getFiltered());
-      });
-    });
-
-    // ── Init ─────────────────────────────────────────────
-    reloadLayer();
-    document.querySelector(".chip[data-peril='all']").classList.add("active");
-    document.querySelector(".radio-btn[data-size='eco']").classList.add("active");
-    document.querySelector(".tab[data-tab='monde']").classList.add("active");
   });
+  }
   </script>
 </head>
 <body>
@@ -824,24 +1152,27 @@
 
   <!-- Header -->
   <div id="header">
-    <h1>🌍 <span>CatNat</span> Hub</h1>
-    <div class="tabs">
-      <button class="tab" data-tab="monde">🌐 Monde</button>
-      <button class="tab" data-tab="france">🇫🇷 France</button>
-      <button class="tab" data-tab="hazard">🗺️ Aléas</button>
-      <button class="tab" data-tab="data">📊 Données</button>
-      <button class="tab" data-tab="charts">📈 Graphiques</button>
+    <h1><span aria-hidden="true">🌍</span> <span>CatNat</span> Hub</h1>
+    <div class="tabs" role="tablist" aria-label="Vues">
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="monde"><span aria-hidden="true">🌐</span> Monde</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="france"><span aria-hidden="true">🇫🇷</span> France</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="hazard"><span aria-hidden="true">🗺️</span> Aléas</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="data"><span aria-hidden="true">📊</span> Données</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="charts"><span aria-hidden="true">📈</span> Graphiques</button>
     </div>
-    <a href="protection-gap.html" style="margin-left:auto;background:#1a9cd8;color:white;padding:5px 12px;border-radius:5px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap">🛡️ Protection Gap →</a>
-    <div id="headerRight">Sources : Munich Re · Swiss Re Sigma · EM-DAT · CCR · USGS</div>
+    <a class="pg-link" href="protection-gap.html" style="margin-left:auto;background:#1a9cd8;color:white;padding:5px 12px;border-radius:5px;text-decoration:none;font-size:12px;font-weight:600;white-space:nowrap"><span aria-hidden="true">🛡️</span> Protection Gap →</a>
+    <div id="headerRight">Sources : Munich Re · Swiss Re Sigma · EM-DAT · CCR · USGS — valeurs indicatives</div>
   </div>
+
+  <!-- Bandeau d'avertissement (source de données indisponible) -->
+  <div id="warnBar" role="status"></div>
 
   <!-- Stats bar -->
   <div id="statsBar">
     <div class="stat-card">
       <div class="label">Événements</div>
       <div class="value ok" id="stNb">–</div>
-      <div class="sub">filtrés</div>
+      <div class="sub" id="stNbSub">filtrés</div>
     </div>
     <div class="stat-card">
       <div class="label">Victimes (morts)</div>
@@ -866,7 +1197,7 @@
   </div>
 
   <!-- Main : sidebar + map -->
-  <div id="main" style="display:flex;flex:1;overflow:hidden;flex-direction:column">
+  <div id="main">
     <div style="display:flex;flex:1;overflow:hidden">
 
       <!-- Sidebar filtres -->
@@ -875,34 +1206,34 @@
         <div class="filter-group">
           <label>🎯 Type de péril</label>
           <div class="peril-chips">
-            <div class="chip" data-peril="all" style="border-color:#7a99b2;color:#7a99b2">Tous</div>
-            <div class="chip" data-peril="earthquake" style="border-color:#e55353;color:#e55353">Séisme</div>
-            <div class="chip" data-peril="cyclone"    style="border-color:#9b59b6;color:#9b59b6">Cyclone</div>
-            <div class="chip" data-peril="flood"      style="border-color:#3498db;color:#3498db">Inondation</div>
-            <div class="chip" data-peril="tsunami"    style="border-color:#1abc9c;color:#1abc9c">Tsunami</div>
-            <div class="chip" data-peril="heatwave"   style="border-color:#e89b3a;color:#e89b3a">Canicule</div>
-            <div class="chip" data-peril="drought"    style="border-color:#c9a227;color:#c9a227">Sécheresse</div>
-            <div class="chip" data-peril="volcano"    style="border-color:#c0392b;color:#c0392b">Volcan</div>
-            <div class="chip" data-peril="wildfire"   style="border-color:#ff7043;color:#ff7043">Feux</div>
-            <div class="chip" data-peril="storm"      style="border-color:#78909c;color:#78909c">Tempête</div>
-            <div class="chip" data-peril="landslide"  style="border-color:#8d6e63;color:#8d6e63">Glissement</div>
+            <button type="button" class="chip" aria-pressed="false" data-peril="all" style="border-color:#7a99b2;color:#7a99b2">Tous</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="earthquake" style="border-color:#e55353;color:#e55353">Séisme</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="cyclone" style="border-color:#9b59b6;color:#9b59b6">Cyclone</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="flood" style="border-color:#3498db;color:#3498db">Inondation</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="tsunami" style="border-color:#1abc9c;color:#1abc9c">Tsunami</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="heatwave" style="border-color:#e89b3a;color:#e89b3a">Canicule</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="drought" style="border-color:#c9a227;color:#c9a227">Sécheresse</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="volcano" style="border-color:#c0392b;color:#c0392b">Volcan</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="wildfire" style="border-color:#ff7043;color:#ff7043">Feux</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="storm" style="border-color:#78909c;color:#78909c">Tempête</button>
+            <button type="button" class="chip" aria-pressed="false" data-peril="landslide" style="border-color:#8d6e63;color:#8d6e63">Glissement</button>
           </div>
         </div>
 
         <hr class="sep">
 
         <div class="filter-group">
-          <label>📅 Période — De <span id="lbMin">1556</span> à <span id="lbMax">2024</span></label>
-          <input type="range" id="slMin" min="1556" max="2024" value="1556" step="1">
-          <input type="range" id="slMax" min="1556" max="2024" value="2024" step="1">
+          <label><span aria-hidden="true">📅</span> Période — De <span id="lbMin">1556</span> à <span id="lbMax">2024</span></label>
+          <input type="range" id="slMin" min="1556" max="2024" value="1556" step="1" aria-label="Année de début">
+          <input type="range" id="slMax" min="1556" max="2024" value="2024" step="1" aria-label="Année de fin">
         </div>
 
         <hr class="sep">
 
         <div class="filter-group">
-          <label>💀 Minimum de morts : <span id="lbDeaths">0+</span></label>
-          <input type="range" id="slDeaths" min="0" max="6" value="0" step="0.1">
-          <div class="range-labels"><span>0</span><span>1k</span><span>100k</span><span>1M</span></div>
+          <label for="slDeaths"><span aria-hidden="true">💀</span> Minimum de morts : <span id="lbDeaths">0+</span></label>
+          <input type="range" id="slDeaths" min="0" max="6" value="0" step="0.1" aria-label="Minimum de morts (échelle logarithmique)">
+          <div class="range-labels"><span style="left:0">0</span><span style="left:50%">1k</span><span style="left:83.3%">100k</span><span style="left:100%">1M</span></div>
         </div>
 
         <hr class="sep">
@@ -910,12 +1241,20 @@
         <div class="filter-group">
           <label>📐 Taille des symboles par</label>
           <div class="radio-group">
-            <div class="radio-btn" data-size="deaths">💀 Morts</div>
-            <div class="radio-btn" data-size="eco">💸 Pertes éco.</div>
+            <button type="button" class="radio-btn" aria-pressed="false" data-size="deaths"><span aria-hidden="true">💀</span> Morts</button>
+            <button type="button" class="radio-btn" aria-pressed="false" data-size="eco"><span aria-hidden="true">💸</span> Pertes éco.</button>
           </div>
         </div>
 
         <hr class="sep">
+
+        <div id="hazardNote">
+          <strong><span aria-hidden="true">🗺️</span> Aléa sismique observé</strong>
+          Séismes de magnitude 4,5 et plus enregistrés dans le monde sur les
+          <b>30 derniers jours</b>, superposés aux événements historiques.
+          <span id="hazardCount">Chargement du flux USGS…</span>
+          <br>Source : USGS Earthquake Hazards Program (temps réel).
+        </div>
 
         <div id="franceNote">
           <strong>🇫🇷 Régime CatNat français</strong>
@@ -949,6 +1288,7 @@
       <!-- Carte -->
       <div id="mapWrap">
         <div id="viewDiv"></div>
+        <div id="mapLoading"><div class="spinner"></div>Chargement de la carte…</div>
       </div>
     </div>
 
@@ -956,7 +1296,7 @@
     <div id="tablePanel">
       <div id="tablePanelHeader">
         <h3>📋 Historique des événements</h3>
-        <input id="tableSearch" type="text" placeholder="🔍 Rechercher…">
+        <input id="tableSearch" type="text" placeholder="🔍 Rechercher…" aria-label="Rechercher dans l'historique des événements">
       </div>
       <div id="tableWrap">
         <table>
@@ -982,7 +1322,7 @@
   <div id="dataTab">
     <div id="dataFiltersBar">
       <h3>📊 Données</h3>
-      <select id="dfPeril">
+      <select id="dfPeril" aria-label="Filtrer par péril">
         <option value="all">🎯 Tous les périls</option>
         <option value="earthquake">Séisme</option>
         <option value="cyclone">Cyclone</option>
@@ -995,14 +1335,14 @@
         <option value="storm">Tempête</option>
         <option value="landslide">Glissement</option>
       </select>
-      <input id="dfCountry" type="text" placeholder="🌍 Pays / zone…">
+      <input id="dfCountry" type="text" placeholder="🌍 Pays / zone…" aria-label="Filtrer par pays ou zone">
       <span style="color:var(--muted);font-size:11px">Années :</span>
-      <input id="dfYearMin" type="number" min="1556" max="2024" value="1556">
+      <input id="dfYearMin" type="number" min="1556" max="2024" value="1556" aria-label="Année minimum">
       <span style="color:var(--muted)">–</span>
-      <input id="dfYearMax" type="number" min="1556" max="2024" value="2024">
-      <input id="tableSearch2" type="text" placeholder="🔍 Recherche libre…">
+      <input id="dfYearMax" type="number" min="1556" max="2024" value="2024" aria-label="Année maximum">
+      <input id="tableSearch2" type="text" placeholder="🔍 Recherche libre…" aria-label="Recherche libre dans les données">
       <button id="dfReset">✖ Réinitialiser</button>
-      <span id="dfCount">60 événements</span>
+      <span id="dfCount">–</span>
     </div>
     <div style="flex:1;overflow:auto">
       <table>
@@ -1027,13 +1367,13 @@
   <!-- Tab Graphiques -->
   <div id="chartsTab">
     <div class="charts-header">
-      <h3>📈 Graphiques — événements filtrés</h3>
+      <h3><span aria-hidden="true">📈</span> Graphiques — événements filtrés (hors doublons)</h3>
       <div style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)">
         Camembert par :
         <div class="chart-toggle">
-          <div class="chart-btn active" data-pie="eco">💸 Pertes éco.</div>
-          <div class="chart-btn" data-pie="deaths">💀 Morts</div>
-          <div class="chart-btn" data-pie="count">🔢 Nb événements</div>
+          <button type="button" class="chart-btn active" aria-pressed="true" data-pie="eco"><span aria-hidden="true">💸</span> Pertes éco.</button>
+          <button type="button" class="chart-btn" aria-pressed="false" data-pie="deaths"><span aria-hidden="true">💀</span> Morts</button>
+          <button type="button" class="chart-btn" aria-pressed="false" data-pie="count"><span aria-hidden="true">🔢</span> Nb événements</button>
         </div>
       </div>
     </div>

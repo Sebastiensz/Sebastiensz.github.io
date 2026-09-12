@@ -2,11 +2,15 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Protection Gap NatCat – CatNat Hub</title>
 
+  <link rel="preconnect" href="https://js.arcgis.com">
+  <link rel="preconnect" href="https://basemaps.arcgis.com">
+
   <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/dark/main.css">
-  <script src="https://js.arcgis.com/4.30/"></script>
+  <!-- onerror : si le CDN ArcGIS est injoignable, le classement doit rester lisible -->
+  <script src="https://js.arcgis.com/4.30/" onerror="window.ARCGIS_FAILED = true;"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -74,8 +78,11 @@
       display: flex; align-items: center; gap: 6px; padding: 4px 6px;
       border-radius: 4px; cursor: pointer; font-size: 11px;
       border: 1px solid transparent; transition: background 0.1s;
+      width: 100%; text-align: left; background: transparent;
+      color: inherit; font-family: inherit;
     }
     .rank-item:hover { background: var(--card); }
+    .rank-item:focus-visible, tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     .rank-flag { width: 16px; height: 12px; border-radius: 2px; flex-shrink: 0; }
     .rank-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rank-val  { font-weight: 700; white-space: nowrap; }
@@ -125,6 +132,36 @@
 
     .sep { border: none; border-top: 1px solid var(--border); }
 
+    /* Bandeau d'avertissement (source indisponible) */
+    #warnBar {
+      display: none; flex-shrink: 0; align-items: center; gap: 8px;
+      background: rgba(232,155,58,0.14); border-bottom: 1px solid rgba(232,155,58,0.45);
+      color: #e89b3a; padding: 7px 16px; font-size: 12px; line-height: 1.4;
+    }
+    #warnBar.show { display: flex; }
+    .empty-row td { color: var(--muted); text-align: center; padding: 18px 10px; font-style: italic; }
+    /* Pays du jeu de données sans polygone à cette échelle */
+    .nomap { color: var(--muted); cursor: help; }
+
+    /* ── Mobile / petits écrans ──────────────────── */
+    /* La page défile verticalement au lieu d'être figée à 100vh. */
+    @media (max-width: 768px) {
+      html, body { height: auto; }
+      #app { height: auto; min-height: 100vh; }
+      #header { height: auto; flex-wrap: wrap; gap: 8px; padding: 6px 10px; }
+      #header h1 { font-size: 13px; line-height: 1.3; }
+      #srcNote { display: none; }
+      #statsBar { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 6px 10px; }
+      .sc { padding: 4px 8px; min-width: 0; }
+      .sc .val { font-size: 15px; }
+      #main { flex-direction: column; overflow: visible; }
+      #sidebar { width: 100%; max-height: none; border-right: none; border-bottom: 1px solid var(--border); }
+      /* Carte remontée juste sous les indicateurs, filtres en dessous */
+      #mapWrap { flex: none; height: 55vh; min-height: 280px; order: -1; }
+      #tablePanel { height: 320px; }
+      #tSearch { width: 130px; }
+    }
+
     /* Info box */
     .info-box {
       background: rgba(26,156,216,0.08); border: 1px solid rgba(26,156,216,0.25);
@@ -142,6 +179,9 @@
   //  gap     = % des pertes économiques NatCat NON assurées
   //  pen     = pénétration assurance non-vie (primes/PIB %)
   //  region  = région géographique
+  //
+  //  Valeurs indicatives (ordres de grandeur compilés à partir de
+  //  sources publiques), non contractuelles.
   // ════════════════════════════════════════════════════
   var GAP = {
     // ── Très bien couverts (<40%) ─────────────────────
@@ -149,6 +189,7 @@
     "CH": { gap:36,  pen:3.2,  region:"Europe occid.",     name:"Suisse" },
     "US": { gap:40,  pen:4.1,  region:"Amérique du Nord",  name:"États-Unis" },
     "AU": { gap:43,  pen:2.9,  region:"Océanie",          name:"Australie" },
+    "FR": { gap:32,  pen:2.1,  region:"Europe occid.",     name:"France" },
 
     // ── Bien couverts (40–60%) ───────────────────────
     "GB": { gap:44,  pen:2.2,  region:"Europe occid.",     name:"Royaume-Uni" },
@@ -157,7 +198,6 @@
     "IE": { gap:44,  pen:2.5,  region:"Europe occid.",     name:"Irlande" },
     "NO": { gap:44,  pen:2.0,  region:"Europe occid.",     name:"Norvège" },
     "SE": { gap:46,  pen:1.9,  region:"Europe occid.",     name:"Suède" },
-    "FR": { gap:32,  pen:2.1,  region:"Europe occid.",     name:"France" },
     "FI": { gap:48,  pen:1.7,  region:"Europe occid.",     name:"Finlande" },
     "CA": { gap:50,  pen:2.8,  region:"Amérique du Nord",  name:"Canada" },
     "BE": { gap:50,  pen:2.0,  region:"Europe occid.",     name:"Belgique" },
@@ -266,10 +306,221 @@
     return "#888";
   }
 
-  var allCountries = [];  // rempli après le fetch
+  // ── Pays : construits directement depuis GAP ──────────
+  // Le classement, les stats et le tableau ne dépendent pas du fond de
+  // carte : ils restent consultables même si le GeoJSON ou le SDK échoue.
+  function gapCat(g) {
+    if (g < 40) return "Très bien couvert";
+    if (g < 60) return "Bien couvert";
+    if (g < 75) return "Modérément couvert";
+    if (g < 90) return "Peu couvert";
+    return "Très peu couvert";
+  }
+
+  var allCountries = Object.keys(GAP).map(function(iso) {
+    var d = GAP[iso];
+    return {
+      iso: iso, name: d.name, gap: d.gap, pen: d.pen, region: d.region,
+      cov: 100 - d.gap, gap_cat: gapCat(d.gap),
+      mapped: false   // passe à true si un polygone correspond dans le fond
+    };
+  });
+  var byIso = {};
+  allCountries.forEach(function(c) { byIso[c.iso] = c; });
+
   var sortCol = "gap", sortDir = -1;
   var regionFilter = "all";
+  var mapApi = null;   // renseigné seulement si la carte a pu être créée
 
+  function hexToRgba(hex, a) {
+    var r = parseInt(hex.slice(1,3),16);
+    var g = parseInt(hex.slice(3,5),16);
+    var b = parseInt(hex.slice(5,7),16);
+    return [r,g,b,a];
+  }
+
+  /** Échappement HTML — les libellés sont injectés via innerHTML. */
+  function esc(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  // ── Bandeau d'avertissement (source indisponible) ─────
+  var warnMsgs = [];
+  function showWarn(msg) {
+    if (warnMsgs.indexOf(msg) < 0) warnMsgs.push(msg);
+    var bar = document.getElementById("warnBar");
+    if (!bar) return;
+    bar.textContent = "⚠️ " + warnMsgs.join(" · ");
+    bar.classList.add("show");
+  }
+
+  function getVisible() {
+    var s = ((document.getElementById("tSearch")||{}).value || "").toLowerCase();
+    return allCountries.filter(function(c) {
+      if (regionFilter !== "all" && c.region !== regionFilter) return false;
+      if (s && c.name.toLowerCase().indexOf(s) < 0) return false;
+      return true;
+    });
+  }
+
+  // ── Stats globales ────────────────────────────────────
+  function renderStats() {
+    var vals  = allCountries.map(function(c) { return c.gap; });
+    var avg   = Math.round(vals.reduce(function(s,v){ return s+v; }, 0)/vals.length);
+    var best  = allCountries.slice().sort(function(a,b){ return a.gap-b.gap; })[0];
+    var worst = allCountries.slice().sort(function(a,b){ return b.gap-a.gap; })[0];
+    var nGood = allCountries.filter(function(c){ return c.gap < 60; }).length;
+    var nBad  = allCountries.filter(function(c){ return c.gap > 90; }).length;
+
+    document.getElementById("stAvg").textContent   = avg + "%";
+    document.getElementById("stGood").textContent  = nGood + " pays";
+    document.getElementById("stBad").textContent   = nBad  + " pays";
+    document.getElementById("stBest").textContent  = best.name + " (" + best.gap + "%)";
+    document.getElementById("stWorst").textContent = worst.name + " (" + worst.gap + "%)";
+    document.getElementById("stCount").textContent = allCountries.length + " pays";
+  }
+
+  // ── Filtre région ─────────────────────────────────────
+  function renderRegions() {
+    var regions = ["all"].concat(
+      Object.keys(allCountries.reduce(function(acc, c) { acc[c.region] = 1; return acc; }, {})).sort()
+    );
+    var sel = document.getElementById("regionSel");
+    sel.innerHTML = "";
+    regions.forEach(function(r) {
+      var o = document.createElement("option");
+      o.value = r; o.textContent = r === "all" ? "Toutes les régions" : r;
+      sel.appendChild(o);
+    });
+  }
+
+  // ── Classements sidebar ───────────────────────────────
+  function renderRankings() {
+    var sorted = allCountries.slice().sort(function(a,b){ return a.gap - b.gap; });
+    if (regionFilter !== "all") sorted = sorted.filter(function(c){ return c.region === regionFilter; });
+
+    var best5  = sorted.slice(0, 5);
+    var worst5 = sorted.slice(-5).reverse();
+
+    function makeItem(c) {
+      var col = gapColor(c.gap);
+      var li = document.createElement("button");
+      li.type = "button";
+      li.className = "rank-item";
+      li.setAttribute("aria-label", c.name + " : " + c.gap + "% non assuré");
+      li.innerHTML =
+        '<div class="rank-name">' + esc(c.name) + '</div>'
+        + '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + c.gap + '%;background:' + col + '"></div></div>'
+        + '<div class="rank-val" style="color:' + col + '">' + c.gap + '%</div>';
+      li.addEventListener("click", function() { focusCountry(c.iso); });
+      return li;
+    }
+
+    var bList = document.getElementById("bestList");
+    var wList = document.getElementById("worstList");
+    bList.innerHTML = ""; wList.innerHTML = "";
+    best5.forEach(function(c) { bList.appendChild(makeItem(c)); });
+    worst5.forEach(function(c) { wList.appendChild(makeItem(c)); });
+  }
+
+  // ── Tableau ───────────────────────────────────────────
+  function renderTable() {
+    var data = getVisible().slice();
+    data.sort(function(a,b) {
+      var va = a[sortCol], vb = b[sortCol];
+      return va < vb ? sortDir : va > vb ? -sortDir : 0;
+    });
+    var tbody = document.getElementById("tBody");
+    if (!data.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Aucun pays pour ces critères.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(function(c) {
+      var col = gapColor(c.gap);
+      var noPoly = c.mapped ? "" :
+        ' <span class="nomap" title="Pas de polygone à cette échelle : pays absent de la carte">·</span>';
+      return '<tr tabindex="0" data-iso="' + esc(c.iso) + '">'
+        + '<td>' + esc(c.name) + noPoly + '</td>'
+        + '<td>' + esc(c.region) + '</td>'
+        + '<td class="num" style="color:' + col + ';font-weight:700">' + c.gap + '%</td>'
+        + '<td class="bar-cell">'
+        +   '<div style="height:8px;background:#253a50;border-radius:4px;overflow:hidden">'
+        +   '<div class="mini-bar" style="width:' + c.gap + '%;background:' + col + '"></div></div>'
+        + '</td>'
+        + '<td class="num">' + c.cov + '%</td>'
+        + '<td class="num">' + (c.pen ? c.pen.toFixed(1) + '%' : '–') + '</td>'
+        + '<td>' + esc(c.gap_cat) + '</td>'
+        + '</tr>';
+    }).join("");
+  }
+
+  function focusCountry(iso) {
+    if (mapApi) mapApi.focusCountry(iso);
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  Interface (indépendante du SDK ArcGIS)
+  // ══════════════════════════════════════════════════════
+  function initUI() {
+    renderStats();
+    renderRegions();
+    renderRankings();
+    renderTable();
+
+    // — Tri —
+    document.querySelectorAll("thead th[data-col]").forEach(function(th) {
+      th.addEventListener("click", function() {
+        var col = this.getAttribute("data-col");
+        sortDir = (sortCol === col) ? -sortDir : -1;
+        sortCol = col;
+        document.querySelectorAll("thead th").forEach(function(t){ t.classList.remove("sorted"); });
+        this.classList.add("sorted");
+        renderTable();
+      });
+    });
+
+    // — Filtre région —
+    document.getElementById("regionSel").addEventListener("change", function() {
+      regionFilter = this.value;
+      renderRankings();
+      renderTable();
+    });
+
+    // — Recherche —
+    document.getElementById("tSearch").addEventListener("input", renderTable);
+
+    // — Sélection d'un pays (souris + clavier) —
+    var tBody = document.getElementById("tBody");
+    function rowIso(ev) {
+      var tr = ev.target.closest("tr[data-iso]");
+      return tr ? tr.getAttribute("data-iso") : null;
+    }
+    tBody.addEventListener("click", function(ev) {
+      var iso = rowIso(ev); if (iso) focusCountry(iso);
+    });
+    tBody.addEventListener("keydown", function(ev) {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      var iso = rowIso(ev); if (!iso) return;
+      ev.preventDefault(); focusCountry(iso);
+    });
+
+    // — Dégradation gracieuse : SDK ArcGIS indisponible —
+    if (window.ARCGIS_FAILED || typeof require === "undefined") {
+      showWarn("Carte indisponible (CDN ArcGIS injoignable) : le classement par pays reste consultable.");
+      var lm = document.getElementById("loadMsg");
+      if (lm) lm.innerHTML = "<b>Carte indisponible</b><br><small>CDN ArcGIS injoignable</small>";
+    }
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initUI);
+  else initUI();
+
+  // ══════════════════════════════════════════════════════
+  //  Carte (uniquement si le SDK ArcGIS est disponible)
+  // ══════════════════════════════════════════════════════
+  if (typeof require !== "undefined" && !window.ARCGIS_FAILED) {
   require([
     "esri/Map", "esri/views/MapView", "esri/layers/GeoJSONLayer", "esri/widgets/Home"
   ], function(Map, MapView, GeoJSONLayer, Home) {
@@ -283,34 +534,70 @@
     view.ui.move("zoom", "top-left");
     view.ui.add(new Home({ view: view }), "top-left");
 
-    // ── Chargement et fusion ─────────────────────────────
-    var NE_URL = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
+    // Popup ancré (docké) quand la carte est basse ou étroite : ancré au-dessus
+    // du polygone, son en-tête sortait de la zone carte et n'était plus cliquable.
+    view.popup.dockEnabled = true;
+    view.popup.dockOptions = {
+      buttonEnabled: true,
+      position: "bottom-right",
+      breakpoint: { width: 600, height: 700 }
+    };
 
-    fetch(NE_URL)
-      .then(function(r) { return r.json(); })
+    // ── Fond des pays ────────────────────────────────────
+    // Copie locale prioritaire (propriétés réduites, provenance dans le
+    // fichier) ; repli sur le dépôt Natural Earth si elle est absente.
+    var NE_LOCAL  = "data/ne_110m_admin_0_countries.geojson";
+    var NE_REMOTE = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
+
+    function fetchJson(url) {
+      return fetch(url).then(function(r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      });
+    }
+
+    fetchJson(NE_LOCAL)
+      .catch(function() {
+        showWarn("Fond de carte local indisponible : repli sur Natural Earth (GitHub).");
+        return fetchJson(NE_REMOTE);
+      })
       .then(function(geojson) {
         document.getElementById("loadMsg").style.display = "none";
 
-        geojson.features.forEach(function(f) {
-          // Natural Earth has ISO_A2 = "-99" for France and a few others; use ISO_A2_EH as fallback
-          var iso = f.properties.ISO_A2;
-          if (!iso || iso === "-99") iso = f.properties.ISO_A2_EH || f.properties.ADM0_A3 || "";
-          f.properties.iso = iso;
-          var d   = GAP[iso];
-          f.properties.gap      = d ? d.gap  : -1;
-          f.properties.pen      = d ? d.pen  : null;
-          f.properties.region   = d ? d.region : "–";
-          f.properties.fr_name  = d ? d.name : (f.properties.NAME_FR || f.properties.NAME || iso);
-          f.properties.gap_cat  = d ? gapCat(d.gap) : "N/D";
-          f.properties.has_data = d ? 1 : 0;
-          if (d) allCountries.push({ iso: iso, name: d.name, gap: d.gap, pen: d.pen, region: d.region });
+        // Propriétés réduites à ce qui est affiché : typage fiable des
+        // champs et blob beaucoup plus léger que le fichier d'origine.
+        var feats = (geojson.features || []).map(function(f) {
+          var pr  = f.properties || {};
+          var iso = pr.ISO_A2;
+          // ISO_A2 vaut "-99" (France, Norvège…) ou "CN-TW" (Taïwan) :
+          // on se rabat sur ISO_A2_EH puis ADM0_A3.
+          if (!iso || iso === "-99" || !GAP[iso]) iso = pr.ISO_A2_EH || pr.ADM0_A3 || iso || "";
+          var d = GAP[iso];
+          if (d && byIso[iso]) byIso[iso].mapped = true;
+          return {
+            type: "Feature",
+            geometry: f.geometry,
+            properties: {
+              iso:      iso,
+              gap:      d ? d.gap : -1,
+              pen:      d ? d.pen : 0,
+              region:   d ? d.region : "–",
+              fr_name:  d ? d.name : (pr.NAME_FR || pr.NAME || iso),
+              gap_cat:  d ? gapCat(d.gap) : "N/D",
+              has_data: d ? 1 : 0
+            }
+          };
         });
 
-        var blob = new Blob([JSON.stringify(geojson)], { type: "application/json" });
-        var url  = URL.createObjectURL(blob);
+        var blob = new Blob(
+          [JSON.stringify({ type: "FeatureCollection", features: feats })],
+          { type: "application/json" }
+        );
+        var url = URL.createObjectURL(blob);
 
         var layer = new GeoJSONLayer({
           url: url,
+          title: "Protection gap NatCat par pays",
           outFields: ["*"],
           renderer: {
             type: "class-breaks",
@@ -345,148 +632,44 @@
                 + '<div style="display:flex;justify-content:space-between;font-size:10px;color:#7a99b2;margin-bottom:8px">'
                 + '  <span>✅ ' + cov + '% couvert</span><span>❌ ' + g + '% non couvert</span>'
                 + '</div>'
-                + '<b>Catégorie :</b> <span style="color:' + col + '">' + a.gap_cat + '</span><br>'
+                + '<b>Catégorie :</b> <span style="color:' + col + '">' + esc(a.gap_cat) + '</span><br>'
                 + '<b>Pénétration non-vie :</b> ' + (a.pen ? a.pen + '% du PIB' : 'N/D') + '<br>'
-                + '<b>Région :</b> ' + a.region
+                + '<b>Région :</b> ' + esc(a.region)
                 + '<hr style="border-color:#253a50;margin:8px 0">'
-                + '<span style="font-size:10px;color:#7a99b2">Sources : Swiss Re Sigma 2023 · Munich Re NatCatSERVICE</span>'
+                + '<span style="font-size:10px;color:#7a99b2">Sources : Swiss Re Sigma 2023 · Munich Re NatCatSERVICE — valeurs indicatives</span>'
                 + '</div>';
             }
           }
         });
         map.add(layer);
 
-        // Stats globales
-        var vals = allCountries.map(function(c) { return c.gap; });
-        var avg  = Math.round(vals.reduce(function(s,v){return s+v;},0)/vals.length);
-        var best = allCountries.slice().sort(function(a,b){return a.gap-b.gap;})[0];
-        var worst= allCountries.slice().sort(function(a,b){return b.gap-a.gap;})[0];
-        var nGood= allCountries.filter(function(c){return c.gap<60;}).length;
-        var nBad = allCountries.filter(function(c){return c.gap>90;}).length;
-
-        document.getElementById("stAvg").textContent  = avg + "%";
-        document.getElementById("stGood").textContent = nGood + " pays";
-        document.getElementById("stBad").textContent  = nBad  + " pays";
-        document.getElementById("stBest").textContent = best.name + " (" + best.gap + "%)";
-        document.getElementById("stWorst").textContent= worst.name + " (" + worst.gap + "%)";
-
-        // Régions pour le filtre
-        var regions = ["all"].concat(
-          [...new Set(allCountries.map(function(c){return c.region;}).sort())]
-        );
-        var sel = document.getElementById("regionSel");
-        regions.forEach(function(r) {
-          var o = document.createElement("option");
-          o.value = r; o.textContent = r === "all" ? "Toutes les régions" : r;
-          sel.appendChild(o);
-        });
-
-        renderRankings();
+        // Pays sans polygone à cette échelle : signalés dans le tableau
         renderTable();
+
+        mapApi = {
+          focusCountry: function(iso) {
+            layer.queryFeatures({ where: "iso = '" + iso + "'", outFields: ["*"], returnGeometry: true })
+              .then(function(res) {
+                if (!res || !res.features.length) return;
+                var f = res.features[0];
+                var ext = f.geometry && f.geometry.extent;
+                return view.goTo(ext ? ext.clone().expand(1.6) : f.geometry).then(function() {
+                  view.openPopup({ features: [f], location: ext ? ext.center : null });
+                });
+              })
+              .catch(function() { /* animation interrompue : sans conséquence */ });
+          }
+        };
       })
       .catch(function(err) {
-        document.getElementById("loadMsg").innerHTML = "❌ Erreur de chargement<br><small>" + err + "</small>";
+        showWarn("Fond de carte pays indisponible : le classement et le tableau restent consultables.");
+        document.getElementById("loadMsg").innerHTML =
+          "<b>Fond de carte des pays indisponible</b><br>"
+          + "<small>Copie locale et Natural Earth injoignables ("
+          + esc(err && err.message ? err.message : err) + ")</small>";
       });
-
-    // ── Fonctions utilitaires ─────────────────────────────
-    function gapCat(g) {
-      if (g < 40) return "Très bien couvert";
-      if (g < 60) return "Bien couvert";
-      if (g < 75) return "Modérément couvert";
-      if (g < 90) return "Peu couvert";
-      return "Très peu couvert";
-    }
-
-    function hexToRgba(hex, a) {
-      var r = parseInt(hex.slice(1,3),16);
-      var g = parseInt(hex.slice(3,5),16);
-      var b = parseInt(hex.slice(5,7),16);
-      return [r,g,b,a];
-    }
-
-    function getVisible() {
-      return allCountries.filter(function(c) {
-        if (regionFilter !== "all" && c.region !== regionFilter) return false;
-        var s = document.getElementById("tSearch").value.toLowerCase();
-        if (s && c.name.toLowerCase().indexOf(s) < 0) return false;
-        return true;
-      });
-    }
-
-    // ── Rankings sidebar ──────────────────────────────────
-    function renderRankings() {
-      var sorted = allCountries.slice().sort(function(a,b){ return a.gap - b.gap; });
-      if (regionFilter !== "all") sorted = sorted.filter(function(c){return c.region===regionFilter;});
-
-      var best5  = sorted.slice(0, 5);
-      var worst5 = sorted.slice(-5).reverse();
-
-      function makeItem(c) {
-        var col = gapColor(c.gap);
-        var li = document.createElement("div");
-        li.className = "rank-item";
-        li.innerHTML =
-          '<div class="rank-name">' + c.name + '</div>'
-          + '<div class="rank-bar-wrap"><div class="rank-bar" style="width:' + c.gap + '%;background:' + col + '"></div></div>'
-          + '<div class="rank-val" style="color:' + col + '">' + c.gap + '%</div>';
-        return li;
-      }
-
-      var bList = document.getElementById("bestList");
-      var wList = document.getElementById("worstList");
-      bList.innerHTML = ""; wList.innerHTML = "";
-      best5.forEach(function(c) { bList.appendChild(makeItem(c)); });
-      worst5.forEach(function(c) { wList.appendChild(makeItem(c)); });
-    }
-
-    // ── Tableau ───────────────────────────────────────────
-    function renderTable() {
-      var data = getVisible().slice();
-      data.sort(function(a,b) {
-        var va = a[sortCol], vb = b[sortCol];
-        return va < vb ? sortDir : va > vb ? -sortDir : 0;
-      });
-      var tbody = document.getElementById("tBody");
-      tbody.innerHTML = data.map(function(c) {
-        var col = gapColor(c.gap);
-        var cov = 100 - c.gap;
-        return '<tr>'
-          + '<td>' + c.name + '</td>'
-          + '<td>' + c.region + '</td>'
-          + '<td class="num" style="color:' + col + ';font-weight:700">' + c.gap + '%</td>'
-          + '<td class="bar-cell">'
-          +   '<div style="height:8px;background:#253a50;border-radius:4px;overflow:hidden">'
-          +   '<div class="mini-bar" style="width:' + c.gap + '%;background:' + col + '"></div></div>'
-          + '</td>'
-          + '<td class="num">' + cov + '%</td>'
-          + '<td class="num">' + (c.pen ? c.pen.toFixed(1) + '%' : '–') + '</td>'
-          + '<td>' + gapCat(c.gap) + '</td>'
-          + '</tr>';
-      }).join("");
-    }
-
-    // ── Tri ───────────────────────────────────────────────
-    document.querySelectorAll("thead th[data-col]").forEach(function(th) {
-      th.addEventListener("click", function() {
-        var col = this.getAttribute("data-col");
-        sortDir = (sortCol === col) ? -sortDir : -1;
-        sortCol = col;
-        document.querySelectorAll("thead th").forEach(function(t){ t.classList.remove("sorted"); });
-        this.classList.add("sorted");
-        renderTable();
-      });
-    });
-
-    // ── Région filter ─────────────────────────────────────
-    document.getElementById("regionSel").addEventListener("change", function() {
-      regionFilter = this.value;
-      renderRankings();
-      renderTable();
-    });
-
-    // ── Recherche ─────────────────────────────────────────
-    document.getElementById("tSearch").addEventListener("input", renderTable);
   });
+  }
   </script>
 </head>
 <body>
@@ -497,15 +680,18 @@
     <a href="index.html">← CatNat Hub</a>
     <span class="sep">|</span>
     <h1>🛡️ Protection Gap <span>NatCat</span> Mondial</h1>
-    <div id="srcNote">Swiss Re Sigma 2023 · Munich Re NatCatSERVICE · IAIS · Banque Mondiale</div>
+    <div id="srcNote">Swiss Re Sigma 2023 · Munich Re NatCatSERVICE · IAIS · Banque Mondiale — valeurs indicatives</div>
   </div>
+
+  <!-- Bandeau d'avertissement (source de données indisponible) -->
+  <div id="warnBar" role="status"></div>
 
   <!-- Stats bar -->
   <div id="statsBar">
     <div class="sc">
       <div class="lbl">Gap moyen mondial</div>
       <div class="val amber" id="stAvg">–</div>
-      <div class="sub">% non assuré</div>
+      <div class="sub">% non assuré · <span id="stCount">–</span></div>
     </div>
     <div class="sc">
       <div class="lbl">Bien couverts (&lt;60%)</div>
@@ -536,8 +722,8 @@
     <div id="sidebar">
 
       <div>
-        <div class="sg-title">🗺️ Filtrer par région</div>
-        <select id="regionSel"></select>
+        <div class="sg-title" id="regionLabel"><span aria-hidden="true">🗺️</span> Filtrer par région</div>
+        <select id="regionSel" aria-labelledby="regionLabel"></select>
       </div>
 
       <hr class="sep">
@@ -596,7 +782,7 @@
   <div id="tablePanel">
     <div id="tph">
       <h3>📋 Classement par pays — Protection Gap NatCat</h3>
-      <input id="tSearch" type="text" placeholder="🔍 Rechercher un pays…">
+      <input id="tSearch" type="text" placeholder="🔍 Rechercher un pays…" aria-label="Rechercher un pays">
     </div>
     <div id="tableWrap">
       <table>
